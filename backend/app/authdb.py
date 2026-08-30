@@ -113,6 +113,7 @@ def create_invite(created_by,max_uses=1):
 def consume_invite(code):
     with connect() as c:
         row=c.execute("SELECT * FROM invite_codes WHERE code=? AND active=1",(code.strip().upper(),)).fetchone()
+        print("INVITE DEBUG:", code.strip().upper(), dict(row) if row else None, flush=True)
         if not row or row["uses"]>=row["max_uses"]: return False
         uses=row["uses"]+1
         active=0 if uses>=row["max_uses"] else 1
