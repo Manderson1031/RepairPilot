@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "RepairPilot",
+    "slug": "repairpilot",
+    "version": "0.12.0",
+    "scheme": "repairpilot",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "plugins": [
+      "expo-router",
+      "expo-secure-store"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "config": {
+        "usesNonExemptEncryption": false
+      },
+      "bundleIdentifier": "com.repairpilot.app",
+      "buildNumber": "12"
+    },
+    "android": {
+      "package": "com.repairpilot.app",
+      "versionCode": 12,
+      "permissions": [
+        "CAMERA"
+      ]
+    }
+  }
+}

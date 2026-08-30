@@ -1,0 +1,9 @@
+backend/.env
+backend/.env.production.generated
+mobile/.env.local
+backups/
+data/*.db
+**/__pycache__/
+**/.pytest_cache/
+*.pyc
+.DS_Store

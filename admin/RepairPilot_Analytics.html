@@ -1,0 +1,16 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>RepairPilot Admin Metrics</title>
+<style>body{font-family:system-ui;background:#07161b;color:#fff;max-width:1050px;margin:auto;padding:24px}.card{background:#0d232a;border:1px solid #20404a;border-radius:16px;padding:16px;margin:12px 0}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.big{font-size:30px;font-weight:800}.muted{color:#9eb3aa}input,button{padding:12px;border-radius:10px;border:1px solid #2a4c55;background:#102b33;color:#fff}button{background:#36c45b;color:#06220e;font-weight:800}@media(max-width:700px){.grid{grid-template-columns:1fr 1fr}}</style></head><body>
+<h1>RepairPilot Beta Metrics</h1><div class="card"><input id="api" value="http://127.0.0.1:8000"><input id="token" placeholder="Admin bearer token"><button onclick="load()">Refresh</button></div>
+<div class="grid">
+<div class="card"><div class="muted">Testers</div><div class="big" id="testers">—</div></div>
+<div class="card"><div class="muted">Equipment</div><div class="big" id="equipment">—</div></div>
+<div class="card"><div class="muted">Saved repairs</div><div class="big" id="repairs">—</div></div>
+<div class="card"><div class="muted">Open reviews</div><div class="big" id="reviews">—</div></div>
+<div class="card"><div class="muted">Feedback</div><div class="big" id="feedback">—</div></div>
+<div class="card"><div class="muted">Avg rating</div><div class="big" id="rating">—</div></div>
+<div class="card"><div class="muted">Repair success</div><div class="big" id="success">—</div></div>
+<div class="card"><div class="muted">Diagnosis sessions</div><div class="big" id="diagnostics">—</div></div>
+<div class="card"><div class="muted">Unresolved</div><div class="big" id="unresolved">—</div></div>
+<div class="card"><div class="muted">Confirmed fixed</div><div class="big" id="fixed">—</div></div>
+</div><div class="card"><h2>Recent audit activity</h2><div id="audit"></div></div>
+<script>const $=x=>document.getElementById(x);async function load(){let h={Authorization:'Bearer '+$('token').value};let r=await fetch($('api').value+'/admin/metrics',{headers:h});let j=await r.json();for(let [id,key] of [['testers','testers'],['equipment','equipment_profiles'],['repairs','saved_repairs'],['reviews','open_reviews'],['feedback','feedback_responses'],['rating','average_rating'],['diagnostics','diagnostic_sessions'],['unresolved','unresolved_sessions'],['fixed','confirmed_fixed_sessions']])$(id).textContent=j[key]??'—';$('success').textContent=(j.repair_success_rate??'—')+'%';let a=await fetch($('api').value+'/admin/audit',{headers:h});let x=await a.json();$('audit').innerHTML=Array.isArray(x)?x.map(e=>`<p><b>${e.event}</b> <span class="muted">${e.entity_type} ${e.entity_id}</span></p>`).join(''):JSON.stringify(x)}</script></body></html>

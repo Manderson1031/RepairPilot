@@ -1,0 +1,70 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>RepairPilot V4</title>
+<style>
+:root{--bg:#07161b;--p:#0d232a;--line:#20404a;--t:#f4f8f6;--m:#9eb3aa;--g:#36c45b}
+*{box-sizing:border-box}body{margin:0;background:linear-gradient(#061419,#0b1e24);color:var(--t);font-family:system-ui,-apple-system,sans-serif}.app{max-width:560px;margin:auto;padding:16px;min-height:100vh}
+.brand{font-weight:900;font-size:30px}.brand span{color:var(--g)}.card{background:var(--p);border:1px solid var(--line);border-radius:20px;padding:17px;margin:12px 0}
+h1,h2,p{margin-top:0}label{display:block;color:var(--m);font-size:13px;margin:13px 0 6px}input,select,textarea{width:100%;padding:13px;border-radius:12px;border:1px solid var(--line);background:#07191f;color:white;font-size:16px}textarea{min-height:90px}
+button{width:100%;padding:14px;border:0;border-radius:13px;background:var(--g);color:#06220e;font-weight:800;font-size:16px;margin-top:9px}.secondary,.choice{background:#14333c;color:white;border:1px solid #2a4c55}.hidden{display:none}.muted{color:var(--m)}.small{font-size:13px}.top{display:flex;justify-content:space-between;align-items:center}.row{display:flex;gap:9px}.row>*{flex:1}
+.pill{display:inline-block;padding:5px 9px;border-radius:999px;font-size:12px}.green{background:#123b22;color:#9cf3aa}.yellow{background:#473b12;color:#ffe69a}.red{background:#4a2020;color:#ffc7c7}
+.list{border-top:1px solid var(--line);padding:10px 0}.chat{padding:13px;border-radius:15px;margin:8px 0}.ai{background:#15313a}.user{background:#1b6a36;margin-left:48px}.cite{background:#0b2b34;border:1px solid #28515d;border-radius:10px;padding:9px;margin-top:8px;font-size:13px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}.tile{background:#12313a;border:1px solid #28515d;border-radius:15px;padding:15px}
+.preview{max-width:100%;border-radius:14px;border:1px solid #2a4c55;margin-top:10px}.bar{height:6px;background:#173039;border-radius:9px;overflow:hidden}.bar div{height:100%;background:var(--g)}
+</style></head><body><div class="app">
+<div class="top"><div class="brand">Repair<span>Pilot</span></div><span id="mode" class="pill yellow">checking…</span></div>
+
+<section id="home" class="card"><h1>Repair workspace</h1><div class="grid">
+<div class="tile" onclick="show('profile')"><b>Add equipment</b><br><span class="muted small">Create a machine profile</span></div>
+<div class="tile" onclick="show('photo')"><b>Analyze photo</b><br><span class="muted small">Nameplate/component recognition</span></div>
+<div class="tile" onclick="show('manual')"><b>Add manual</b><br><span class="muted small">PDF knowledge source</span></div>
+<div class="tile" onclick="show('diagnose')"><b>Diagnose</b><br><span class="muted small">Guided AI session</span></div>
+</div><label>Backend URL</label><input id="api" value="http://127.0.0.1:8000"></section>
+
+<section id="profile" class="card hidden"><h2>Add equipment</h2>
+<label>Name</label><input id="pname" placeholder="Roto-Die Model 15">
+<label>Category</label><select id="pcat"><option>Small engine</option><option>Hydraulic equipment</option><option>Electrical/control equipment</option><option>Shop machinery</option><option>Other</option></select>
+<label>Manufacturer</label><input id="pmfr"><label>Model</label><input id="pmodel"><label>Serial</label><input id="pserial">
+<button onclick="saveProfile()">Save profile</button><button class="secondary" onclick="show('home')">Back</button></section>
+
+<section id="photo" class="card hidden"><h2>Analyze equipment photo</h2>
+<input id="photoFile" type="file" accept="image/*"><img id="preview" class="preview hidden">
+<button onclick="analyzePhoto()">Analyze photo</button><div id="photoResult"></div><button class="secondary" onclick="show('home')">Back</button></section>
+
+<section id="manual" class="card hidden"><h2>Add service manual</h2><label>Equipment</label><select id="manualEq"></select>
+<input id="manualFile" type="file" accept=".pdf"><button onclick="uploadManual()">Upload and index PDF</button><div id="manualResult"></div><button class="secondary" onclick="show('home')">Back</button></section>
+
+<section id="diagnose" class="card hidden"><h2>Start diagnosis</h2><label>Equipment</label><select id="diagEq"></select>
+<label>Symptom</label><textarea id="symptom" placeholder="Describe exactly what the machine is doing"></textarea>
+<label>Optional visual evidence</label><div id="visualBadge" class="muted small">No analyzed photo attached.</div>
+<button onclick="begin()">Start diagnosis</button><button class="secondary" onclick="show('home')">Back</button></section>
+
+<section id="session" class="card hidden"><div class="top"><strong id="eqName"></strong><span id="risk"></span></div>
+<div id="chat"></div><div id="controls"></div><div id="evidence"></div><div id="hypotheses"></div>
+<button class="secondary" onclick="finishSession()">End / save outcome</button></section>
+
+<section id="outcome" class="card hidden"><h2>Save repair outcome</h2><label>What fixed it?</label><input id="fix"><label>Part used</label><input id="part"><label>Notes</label><textarea id="notes"></textarea><button onclick="saveRepair()">Save repair</button></section>
+
+<section class="card"><button class="secondary" onclick="show('home')">Home</button></section>
+</div><script>
+let equipment=[],visual=null,history=[],last=null,current=null;
+const $=x=>document.getElementById(x), sections=["home","profile","photo","manual","diagnose","session","outcome"];
+function base(){return $("api").value.replace(/\/$/,"")}function show(x){sections.forEach(s=>$(s).classList.add("hidden"));$(x).classList.remove("hidden");if(x==="manual"||x==="diagnose")refreshSelects()}
+function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[m]))}
+async function health(){try{let j=await(await fetch(base()+"/health")).json();$("mode").textContent=j.mode.toUpperCase()+" V"+j.version;$("mode").className="pill "+(j.mode==="ai"?"green":"yellow")}catch{$("mode").textContent="BACKEND OFFLINE";$("mode").className="pill red"}}
+async function loadEquipment(){try{equipment=await(await fetch(base()+"/equipment")).json()}catch{equipment=[]}refreshSelects()}
+function refreshSelects(){for(const id of ["manualEq","diagEq"]){let e=$(id);if(e)e.innerHTML=equipment.map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join("")}}
+async function saveProfile(){let p={name:$("pname").value.trim(),category:$("pcat").value,manufacturer:$("pmfr").value.trim(),model:$("pmodel").value.trim(),serial:$("pserial").value.trim(),notes:""};if(!p.name)return alert("Enter a name");let r=await fetch(base()+"/equipment",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)});if(!r.ok)return alert(await r.text());await loadEquipment();show("home")}
+$("photoFile").addEventListener("change",()=>{let f=$("photoFile").files[0];if(!f)return;let u=URL.createObjectURL(f);$("preview").src=u;$("preview").classList.remove("hidden")})
+async function analyzePhoto(){let f=$("photoFile").files[0];if(!f)return alert("Choose an image");let fd=new FormData();fd.append("file",f);$("photoResult").innerHTML='<p class="muted">Analyzing…</p>';let r=await fetch(base()+"/photos/analyze",{method:"POST",body:fd});if(!r.ok)return $("photoResult").textContent=await r.text();visual=await r.json();$("photoResult").innerHTML=`<div class="list"><b>${esc(visual.description)}</b><br><span class="muted small">Confidence: ${Math.round(visual.confidence*100)}%</span></div>`+(visual.extracted_text.length?`<div class="cite"><b>Readable text</b><br>${visual.extracted_text.map(esc).join("<br>")}</div>`:"");$("visualBadge").textContent="Attached analyzed photo: "+visual.filename}
+async function uploadManual(){let f=$("manualFile").files[0],eid=$("manualEq").value;if(!f||!eid)return alert("Choose equipment and PDF");let fd=new FormData();fd.append("equipment_id",eid);fd.append("file",f);$("manualResult").innerHTML='<p class="muted">Indexing…</p>';let r=await fetch(base()+"/manuals/upload",{method:"POST",body:fd});let j=await r.json();$("manualResult").innerHTML=`<div class="list">Indexed <b>${esc(j.name)}</b>: ${j.pages_parsed} pages</div>`}
+async function begin(){current=equipment.find(x=>x.id===$("diagEq").value);if(!current)return alert("Create equipment first.");if(!$("symptom").value.trim())return alert("Enter a symptom.");history=[];show("session");$("eqName").textContent=current.name;await next()}
+async function next(){let payload={equipment_profile:current,symptom:$("symptom").value,history,visual_evidence:visual?[visual]:[]};$("controls").innerHTML='<p class="muted">Choosing next diagnostic step…</p>';let r=await fetch(base()+"/diagnose",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});if(!r.ok)return $("controls").textContent=await r.text();last=await r.json();render()}
+function render(){let html=`<div class="chat user">${esc($("symptom").value)}</div>`;history.forEach(h=>html+=`<div class="chat ai">${esc(h.question)}</div><div class="chat user">${esc(h.answer)}</div>`);if(last.status==="ask"&&last.next_step)html+=`<div class="chat ai"><b>RepairPilot</b><br>${esc(last.next_step.question)}<div class="muted small" style="margin-top:7px">${esc(last.risk.reason)}</div></div>`;else if(last.status==="escalate")html+=`<div class="chat ai"><b>Technician escalation recommended.</b><br>${esc(last.risk.reason)}</div>`;else html+=`<div class="chat ai"><b>Diagnostic path complete.</b><br>${esc(last.notes_for_record)}</div>`;$("chat").innerHTML=html;
+$("risk").textContent=last.risk.level.toUpperCase();$("risk").className="pill "+last.risk.level;
+let c="";if(last.status==="ask"&&last.next_step){if(last.next_step.answer_type==="choice")c=last.next_step.choices.map(v=>`<button class="choice" onclick='answer(${JSON.stringify(v)})'>${esc(v)}</button>`).join("");else c=`<label>${last.next_step.unit?"Measurement ("+esc(last.next_step.unit)+")":"Answer"}</label><div class="row"><input id="entry"><button onclick="typed()">Submit</button></div>`}$("controls").innerHTML=c;
+$("evidence").innerHTML=last.evidence.length?'<h2>Evidence</h2>'+last.evidence.map(e=>`<div class="cite"><b>${esc(e.source)}</b>${e.citation?` — ${esc(e.citation)}`:""}${e.detail?`<br>${esc(e.detail)}`:""}</div>`).join(""):"";
+$("hypotheses").innerHTML='<h2>Working hypotheses</h2>'+last.working_hypotheses.map(h=>`<div class="list">${esc(h.cause)} <span class="muted">${Math.round(h.confidence*100)}%</span><div class="bar"><div style="width:${Math.round(h.confidence*100)}%"></div></div></div>`).join("")}
+function answer(v){history.push({question:last.next_step.question,answer:v,risk:last.risk.level});next()}function typed(){let v=$("entry").value.trim();if(v)answer(v+(last.next_step.unit?" "+last.next_step.unit:""))}
+function finishSession(){show("outcome")}async function saveRepair(){let p={equipment_id:current.id,equipment_name:current.name,symptom:$("symptom").value,history,fix:$("fix").value.trim()||"Unresolved",part:$("part").value.trim(),notes:$("notes").value.trim(),saved:new Date().toISOString()};await fetch(base()+"/repairs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)});visual=null;history=[];last=null;current=null;show("home")}
+health();loadEquipment();
+</script></body></html>

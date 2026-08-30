@@ -1,0 +1,20 @@
+RepairPilot V15 Preflight
+ PASS file:backend/Dockerfile
+ PASS file:backend/postgres/schema.sql
+ PASS file:render.yaml
+ PASS file:mobile/eas.json
+ PASS file:PRIVACY_DRAFT.md
+ PASS file:TERMS_BETA_DRAFT.md
+ PASS file:BETA_LAUNCH_CHECKLIST.md
+ PASS file:.github/workflows/ci.yml
+ PASS file:ops/backup.sh
+ PASS iOS bundle id
+ PASS Android package
+ PASS deep-link scheme
+ PASS version
+ PASS secret scan OpenAI key
+ PASS secret scan Supabase service JWT
+ PASS production env absent
+ WARN Privacy and beta terms still require owner/counsel review before public release.
+
+16 passed, 1 warnings, 0 failures

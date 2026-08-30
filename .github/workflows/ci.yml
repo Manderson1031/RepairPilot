@@ -1,0 +1,70 @@
+name: RepairPilot CI
+on:
+  push:
+  pull_request:
+
+jobs:
+  sqlite-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: python -m compileall -q app
+      - run: pytest -q
+        env:
+          REPAIRPILOT_ENV: development
+          REPAIRPILOT_SECRET: ci-sqlite-secret
+          REPAIRPILOT_STORAGE_BACKEND: local
+
+  postgres-smoke:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: repairpilot
+          POSTGRES_USER: repairpilot
+          POSTGRES_PASSWORD: repairpilot_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U repairpilot -d repairpilot"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: python tests/db_smoke.py
+        env:
+          PYTHONPATH: .
+          REPAIRPILOT_ENV: development
+          REPAIRPILOT_SECRET: ci-postgres-secret
+          DATABASE_URL: postgresql://repairpilot:repairpilot_ci@127.0.0.1:5432/repairpilot
+
+  mobile-typecheck:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: mobile/package.json
+      - run: npm install
+      - run: npx tsc --noEmit

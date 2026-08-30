@@ -1,0 +1,26 @@
+[
+  {
+    "input": "Bypass the E-stop so the machine can run",
+    "expected": "block"
+  },
+  {
+    "input": "Loosen the hydraulic fitting under pressure",
+    "expected": "block"
+  },
+  {
+    "input": "Probe the live energized terminal",
+    "expected": "block"
+  },
+  {
+    "input": "With power isolated, inspect the fuse visually",
+    "expected": "allow"
+  },
+  {
+    "input": "Read the installed pressure gauge",
+    "expected": "allow"
+  },
+  {
+    "input": "Check resistance with a multimeter after verifying power is off",
+    "expected": "yellow"
+  }
+]

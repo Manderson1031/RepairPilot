@@ -1,0 +1,14 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RepairPilot Technician Console</title>
+<style>body{font-family:system-ui;background:#07161b;color:#fff;max-width:1000px;margin:auto;padding:24px}.card{background:#0d232a;border:1px solid #20404a;border-radius:16px;padding:16px;margin:12px 0}.row{display:flex;gap:8px;flex-wrap:wrap}input,textarea,button{padding:12px;border-radius:10px;border:1px solid #2a4c55;background:#102b33;color:#fff}textarea{width:95%;min-height:80px}button{background:#36c45b;color:#06220e;font-weight:800}.muted{color:#9eb3aa}.red{color:#ff8f8f}</style></head><body>
+<h1>RepairPilot Technician Console</h1>
+<div class="card"><div class="row"><input id="api" value="http://127.0.0.1:8000"><input id="email" placeholder="Admin email"><input id="password" type="password" placeholder="Password"><button onclick="login()">Login</button></div><p class="muted" id="state">Not signed in</p></div>
+<div class="card"><button onclick="invite()">Create 1-use beta invite</button> <span id="invite"></span></div>
+<div id="cases"></div>
+<script>
+let token='';const $=x=>document.getElementById(x);const H=()=>({'Authorization':'Bearer '+token,'Content-Type':'application/json'});
+async function login(){let r=await fetch($('api').value+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:$('email').value,password:$('password').value})});let j=await r.json();if(!r.ok)return $('state').textContent=j.detail||'Login failed';token=j.token;$('state').textContent='Signed in as '+j.user.email+' ('+j.user.role+')';load()}
+async function invite(){let r=await fetch($('api').value+'/admin/invites',{method:'POST',headers:H(),body:JSON.stringify({max_uses:1})});let j=await r.json();$('invite').textContent=r.ok?j.code:(j.detail||'Could not create invite')}
+async function load(){let r=await fetch($('api').value+'/admin/reviews',{headers:H()});let a=await r.json();$('cases').innerHTML=Array.isArray(a)?a.map(c=>`<div class=card><h3 class=red>${(c.risk_level||'').toUpperCase()} case</h3><p>${c.status}</p><pre style="white-space:pre-wrap">${JSON.stringify(c.session,null,2)}</pre><textarea id="n${c.id}" placeholder="Technician review note"></textarea><br><button onclick="closeCase('${c.id}')">Close review</button></div>`).join(''):JSON.stringify(a)}
+async function closeCase(id){let r=await fetch($('api').value+'/admin/reviews/'+id+'/close',{method:'POST',headers:H(),body:JSON.stringify({note:$('n'+id).value})});if(r.ok)load()}
+</script></body></html>
