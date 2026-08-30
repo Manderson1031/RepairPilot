@@ -8,11 +8,11 @@ from .config import settings
 SQLITE_DB=Path(__file__).resolve().parents[2]/"data"/"repairpilot.db"
 
 def backend_name()->str:
-    url=(settings.database_url or "").lower()
+    url=(os.getenv("DATABASE_URL") or settings.database_url or "").strip().lower()
     return "postgres" if url.startswith(("postgres://","postgresql://")) else "sqlite"
 
 def _pg_url()->str:
-    url=settings.database_url
+    url=(os.getenv("DATABASE_URL") or settings.database_url or "").strip()
     if url.startswith("postgres://"):
         return "postgresql://"+url[len("postgres://"):]
     return url
