@@ -33,3 +33,13 @@ def test_multimeter_elevates_to_yellow():
     )
     out=enforce(r)
     assert out.risk.level=="yellow"
+
+
+def test_any_red_risk_is_a_hard_escalation():
+    from app.models import DiagnoseResponse,NextStep,Risk
+    from app.safety import enforce
+    resp=DiagnoseResponse(status="ask",next_step=NextStep(question="Perform a test",answer_type="text"),risk=Risk(level="red",reason="High energy"))
+    out=enforce(resp)
+    assert out.status=="escalate"
+    assert out.next_step is None
+    assert out.risk.requires_qualified_technician is True

@@ -18,6 +18,23 @@ Primary behavior:
 - Cite manual evidence as 'Manual name, page N' when provided.
 """
 
+
+def select_model(req:DiagnoseRequest,manual:list[dict])->str:
+    """Route diagnostic work across current GPT-5.6 tiers unless explicitly overridden."""
+    explicit=os.getenv("REPAIRPILOT_MODEL")
+    if explicit:
+        return explicit
+    routine=os.getenv("REPAIRPILOT_MODEL_ROUTINE","gpt-5.6-luna")
+    normal=os.getenv("REPAIRPILOT_MODEL_NORMAL","gpt-5.6-terra")
+    difficult=os.getenv("REPAIRPILOT_MODEL_DIFFICULT","gpt-5.6-sol")
+    category=(req.equipment_profile.category or "").lower()
+    high_consequence=any(x in category for x in ("electrical","control","hydraulic","industrial"))
+    if len(req.history)>=4 or (manual and len(req.history)>=2) or high_consequence:
+        return difficult
+    if len(req.history)<=1 and not manual and not req.visual_evidence:
+        return routine
+    return normal
+
 SCHEMA={
 "type":"object","additionalProperties":False,
 "required":["status","next_step","risk","evidence","working_hypotheses","notes_for_record"],
@@ -49,11 +66,13 @@ def demo(req:DiagnoseRequest,manual:list[dict])->DiagnoseResponse:
           ("Does the pump sound normal, or is it whining/cavitating?","choice",["Sounds normal","Whines / cavitates","Not sure"],None,"green")]
         hypo=[Hypothesis(cause="Pump flow/inlet issue",confidence=.45),Hypothesis(cause="Relief/unloading valve path",confidence=.30)]
     elif "elect" in cat or "contactor" in symptom:
-        steps=[
-          ("Do you already have a safely obtained, verified voltage reading directly across the contactor coil while ON is commanded?","choice",["Yes","No","Not qualified / stop"],None,"red"),
-          ("Enter that verified coil-voltage reading.","measurement",[],"V","yellow"),
-          ("With power isolated and verified de-energized, did a coil-resistance or mechanical inspection reveal an open coil or stuck armature?","choice",["Open/failed coil","Mechanical binding","Neither","Not tested"],None,"yellow")]
         hypo=[Hypothesis(cause="Upstream control-circuit open",confidence=.45),Hypothesis(cause="Contactor coil/mechanism fault",confidence=.35)]
+        if n and req.history[-1].answer.lower() in {"no","not qualified / stop"}:
+            return enforce(DiagnoseResponse(status="escalate",next_step=None,risk=Risk(level="red",reason="The next useful electrical test would require a qualified person to obtain an energized measurement.",requires_qualified_technician=True),evidence=evidence,working_hypotheses=hypo,notes_for_record="Escalated before energized electrical testing."))
+        steps=[
+          ("Do you already have a safely obtained, verified voltage reading directly across the contactor coil while ON is commanded?","choice",["Yes","No","Not qualified / stop"],None,"green"),
+          ("Enter that already-obtained coil-voltage reading.","measurement",[],"V","green"),
+          ("With power isolated and verified de-energized, did a coil-resistance or mechanical inspection reveal an open coil or stuck armature?","choice",["Open/failed coil","Mechanical binding","Neither","Not tested"],None,"yellow")]
     else:
         steps=[
           ("Does partially applying the choke change the surging?","choice",["Surging improves","No change","Gets worse"],None,"green"),
@@ -74,7 +93,7 @@ def diagnose(req:DiagnoseRequest,manual:list[dict])->DiagnoseResponse:
              "visual_evidence":[v.model_dump() for v in req.visual_evidence],
              "manual_excerpts":manual}
     resp=client.responses.create(
-      model=os.getenv("REPAIRPILOT_MODEL","gpt-5.5"),
+      model=select_model(req,manual),
       instructions=SYSTEM,input=json.dumps(context),
       text={"format":{"type":"json_schema","name":"repairpilot_diagnostic","strict":True,"schema":SCHEMA}},
       max_output_tokens=1300,store=False)

@@ -2,6 +2,7 @@ services:
   - type: web
     name: repairpilot-api
     runtime: docker
+    rootDir: backend
     dockerfilePath: ./Dockerfile
     healthCheckPath: /ready
     envVars:
@@ -9,9 +10,19 @@ services:
         value: production
       - key: REPAIRPILOT_SECRET
         generateValue: true
+      - key: REPAIRPILOT_ALLOWED_ORIGINS
+        sync: false
       - key: OPENAI_API_KEY
         sync: false
       - key: DATABASE_URL
+        sync: false
+      - key: SENTRY_DSN
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: REPAIRPILOT_RESET_EMAIL_FROM
+        sync: false
+      - key: REPAIRPILOT_PUBLIC_APP_URL
         sync: false
       - key: REPAIRPILOT_STORAGE_BACKEND
         value: supabase

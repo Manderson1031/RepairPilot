@@ -1,0 +1,22 @@
+RepairPilot V18 verification
+============================
+
+Backend API/test suite: 23 passed
+- Full suite executed with a local no-op SlowAPI test shim because SlowAPI is not installed in this execution environment and package-index network access is unavailable.
+- Production requirements continue to include slowapi>=0.1.9; rate limiting is not removed or bypassed in application code.
+
+Additional verification:
+- Dependency-independent backend suites: PASS
+- Python compileall: PASS
+- TypeScript/TSX syntax transpilation: PASS
+- Release preflight: 16 passed, 1 expected legal-review warning, 0 failures
+- Production Supabase migration v18_server_only_hardening_and_indexes: applied
+- Production Supabase migration v18_token_version: applied
+- Supabase security advisor after migration: no active security lints
+
+External verification still required after deployment:
+- Push V18 source to GitHub / trigger Render deploy
+- Confirm live /ready returns database_reachable=true and storage_configured=true
+- Run authenticated live equipment -> diagnose -> repair -> feedback flow
+- Upload a real photo and PDF manual to verify Supabase Storage + OpenAI vision/manual path
+- Build/install the Expo mobile beta on a device

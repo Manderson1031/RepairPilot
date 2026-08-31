@@ -36,7 +36,7 @@ def init():
     with connect() as c:
         c.executescript("""
         CREATE TABLE IF NOT EXISTS users(
-          id TEXT PRIMARY KEY,email TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL,role TEXT DEFAULT 'tester',created INTEGER NOT NULL
+          id TEXT PRIMARY KEY,email TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL,role TEXT DEFAULT 'tester',created INTEGER NOT NULL,token_version INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS invite_codes(
           code TEXT PRIMARY KEY,created_by TEXT,max_uses INTEGER,uses INTEGER DEFAULT 0,active INTEGER DEFAULT 1,created INTEGER
@@ -78,6 +78,8 @@ def init():
         cols=[r[1] for r in c.execute("PRAGMA table_info(users)").fetchall()]
         if "role" not in cols:
             c.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'tester'")
+        if "token_version" not in cols:
+            c.execute("ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0")
 init()
 
 def create_user(email,password,role="tester"):
@@ -90,35 +92,75 @@ def create_user(email,password,role="tester"):
     except integrity_errors():
         return None
 
+def register_user_with_invite(email,password,invite_code,role="tester"):
+    """Create a user and consume an invite in one transaction.
+
+    This prevents duplicate-account attempts from burning an invite and uses a
+    row lock on PostgreSQL so a one-use invite cannot be consumed twice by
+    concurrent registrations. Returns (user, reason) where reason is one of
+    ``ok``, ``invite``, or ``exists``.
+    """
+    normalized=email.lower().strip()
+    code=(invite_code or "").strip().upper()
+    uid=str(uuid.uuid4()); now=int(time.time())
+    try:
+        with connect() as c:
+            if c.kind=="sqlite":
+                # Acquire the SQLite write lock before checking invite usage.
+                c.execute("BEGIN IMMEDIATE")
+            existing=c.execute("SELECT id FROM users WHERE email=?",(normalized,)).fetchone()
+            if existing:
+                return None,"exists"
+            sql="SELECT * FROM invite_codes WHERE code=? AND active=1"
+            if c.kind=="postgres":
+                sql += " FOR UPDATE"
+            row=c.execute(sql,(code,)).fetchone()
+            if not row or row["uses"]>=row["max_uses"]:
+                return None,"invite"
+            c.execute("INSERT INTO users(id,email,password_hash,role,created) VALUES(?,?,?,?,?)",
+                      (uid,normalized,hash_password(password),role,now))
+            uses=row["uses"]+1
+            active=0 if uses>=row["max_uses"] else 1
+            c.execute("UPDATE invite_codes SET uses=?,active=? WHERE code=?",(uses,active,row["code"]))
+        return {"id":uid,"email":normalized,"role":role},"ok"
+    except integrity_errors():
+        return None,"exists"
+
 def verify(email,password):
     with connect() as c:
         row=c.execute("SELECT * FROM users WHERE email=?",(email.lower().strip(),)).fetchone()
     if not row or not verify_password(password,row["password_hash"]): return None
     return dict(row)
 
+def get_user_by_id(user_id):
+    if not user_id:return None
+    with connect() as c:
+        row=c.execute("SELECT id,email,role,created,token_version FROM users WHERE id=?",(user_id,)).fetchone()
+    return dict(row) if row else None
+
 def token_for(user):
-    return jwt.encode({"sub":user["id"],"email":user["email"],"role":user.get("role","tester"),"exp":int(time.time())+60*60*24*30},SECRET,algorithm=ALG)
+    return jwt.encode({"sub":user["id"],"email":user["email"],"role":user.get("role","tester"),"ver":int(user.get("token_version",0) or 0),"exp":int(time.time())+60*60*24*30},SECRET,algorithm=ALG)
 
 def decode_token(token):
     try:return jwt.decode(token,SECRET,algorithms=[ALG])
     except jwt.PyJWTError:return None
 
 def create_invite(created_by,max_uses=1):
-    code="RP-"+secrets.token_hex(4).upper()
+    code="RP-"+secrets.token_hex(8).upper()
     with connect() as c:
         c.execute("INSERT INTO invite_codes(code,created_by,max_uses,uses,active,created) VALUES(?,?,?,?,?,?)",
                   (code,created_by,max_uses,0,1,int(time.time())))
     return {"code":code,"max_uses":max_uses}
 
 def consume_invite(code):
+    """Atomically consume one use of an active invite."""
+    normalized=(code or "").strip().upper()
     with connect() as c:
-        row=c.execute("SELECT * FROM invite_codes WHERE code=? AND active=1",(code.strip().upper(),)).fetchone()
-        
-        if not row or row["uses"]>=row["max_uses"]: return False
-        uses=row["uses"]+1
-        active=0 if uses>=row["max_uses"] else 1
-        c.execute("UPDATE invite_codes SET uses=?,active=? WHERE code=?",(uses,active,row["code"]))
-    return True
+        cur=c.execute("""UPDATE invite_codes
+                         SET uses=uses+1,
+                             active=CASE WHEN uses+1>=max_uses THEN 0 ELSE active END
+                         WHERE code=? AND active=1 AND uses<max_uses""",(normalized,))
+        return cur.rowcount==1
 
 def list_invites(created_by=None):
     with connect() as c:
@@ -308,22 +350,28 @@ def audit_recent(user_id=None,limit=100):
     return out
 
 
+def _reset_token_key(token):
+    return "sha256$"+hashlib.sha256((token or "").encode()).hexdigest()
+
 def create_password_reset(email):
-    import secrets
     with connect() as c:
         row=c.execute("SELECT id FROM users WHERE email=?",(email.lower().strip(),)).fetchone()
         if not row:return None
         token=secrets.token_urlsafe(32)
+        # Only the hash is stored. A database read alone cannot be used to reset an account.
+        c.execute("UPDATE password_reset_tokens SET used=1 WHERE user_id=? AND used=0",(row["id"],))
         c.execute("INSERT INTO password_reset_tokens(token,user_id,expires,used,created) VALUES(?,?,?,?,?)",
-                  (token,row["id"],int(time.time())+1800,0,int(time.time())))
+                  (_reset_token_key(token),row["id"],int(time.time())+1800,0,int(time.time())))
     return token
 
 def consume_password_reset(token,new_password):
+    now=int(time.time()); hashed=_reset_token_key(token)
     with connect() as c:
-        row=c.execute("SELECT * FROM password_reset_tokens WHERE token=? AND used=0",(token,)).fetchone()
-        if not row or row["expires"]<int(time.time()):return False
-        c.execute("UPDATE users SET password_hash=? WHERE id=?",(PWD.hash(new_password),row["user_id"]))
-        c.execute("UPDATE password_reset_tokens SET used=1 WHERE token=?",(token,))
+        # Accept legacy raw tokens once so an in-flight V17 reset link is not broken.
+        row=c.execute("SELECT * FROM password_reset_tokens WHERE token IN (?,?) AND used=0",(hashed,token)).fetchone()
+        if not row or row["expires"]<now:return False
+        c.execute("UPDATE users SET password_hash=?,token_version=token_version+1 WHERE id=?",(hash_password(new_password),row["user_id"]))
+        c.execute("UPDATE password_reset_tokens SET used=1 WHERE token=?",(row["token"],))
     return True
 
 def add_blob_record(user_id,equipment_id,category,filename,content_type,blob):
@@ -336,7 +384,7 @@ def add_blob_record(user_id,equipment_id,category,filename,content_type,blob):
 
 def export_user_data(user_id):
     with connect() as c:
-        user=c.execute("SELECT id,email,role,created FROM users WHERE id=?",(user_id,)).fetchone()
+        user=c.execute("SELECT id,email,role,created,token_version FROM users WHERE id=?",(user_id,)).fetchone()
         equipment=[dict(r) for r in c.execute("SELECT * FROM equipment_v2 WHERE user_id=?",(user_id,)).fetchall()]
         repairs=[]
         for r in c.execute("SELECT * FROM repairs_v2 WHERE user_id=?",(user_id,)).fetchall():
@@ -395,6 +443,10 @@ def save_diagnostic_session(user_id,equipment_id,symptom,request_data,response_d
     status=response_data.get("status","ask")
     risk=(response_data.get("risk") or {}).get("level","green")
     with connect() as c:
+        owner=c.execute("SELECT user_id FROM diagnostic_sessions WHERE id=?",(sid,)).fetchone()
+        if owner and owner["user_id"]!=user_id:
+            # Never let a client-supplied session id collide with another user's session.
+            sid=str(uuid.uuid4())
         existing=c.execute("SELECT id FROM diagnostic_sessions WHERE id=? AND user_id=?",(sid,user_id)).fetchone()
         if existing:
             c.execute("""UPDATE diagnostic_sessions SET equipment_id=?,symptom=?,status=?,risk_level=?,request_json=?,response_json=?,updated=?
@@ -412,6 +464,12 @@ def mark_diagnostic_outcome(user_id,session_id,outcome):
         c.execute("UPDATE diagnostic_sessions SET outcome=?,updated=? WHERE id=? AND user_id=?",
                   (outcome,int(time.time()),session_id,user_id))
     return True
+
+def diagnostic_session_belongs_to_user(user_id,session_id):
+    if not session_id:return False
+    with connect() as c:
+        row=c.execute("SELECT 1 FROM diagnostic_sessions WHERE id=? AND user_id=?",(session_id,user_id)).fetchone()
+    return bool(row)
 
 def diagnostic_metrics():
     with connect() as c:

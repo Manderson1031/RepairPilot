@@ -9,7 +9,7 @@ import * as Sharing from 'expo-sharing';
 import {File,Paths} from 'expo-file-system';
 import * as Linking from 'expo-linking';
 
-const API=process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+const API=process.env.EXPO_PUBLIC_API_URL || 'https://repairpilot-api.onrender.com';
 const TOKEN_KEY='repairpilot.auth.token';
 const DRAFT_KEY='repairpilot.diagnosis.draft';
 const ONBOARD_KEY='repairpilot.onboarding.seen';
@@ -27,6 +27,7 @@ export default function App(){
  const [newName,setNewName]=useState(''),[newCat,setNewCat]=useState('Small engine');
  const [selected,setSelected]=useState<any>(null);
  const [symptom,setSymptom]=useState(''),[history,setHistory]=useState<any[]>([]),[last,setLast]=useState<any>(null),[visual,setVisual]=useState<any>(null);
+ const [answerInput,setAnswerInput]=useState('');
  const [repairs,setRepairs]=useState<any[]>([]),[reviews,setReviews]=useState<any[]>([]);
  const [fix,setFix]=useState(''),[part,setPart]=useState(''),[notes,setNotes]=useState('');
 
@@ -102,23 +103,25 @@ export default function App(){
  const next=async(h=history)=>{
    const body={session_id:last?.session_id||null,equipment_profile:{id:selected.id,name:selected.name,manufacturer:selected.manufacturer||'',model:selected.model||'',serial:selected.serial||'',category:selected.category||'',notes:selected.notes||''},symptom,history:h,visual_evidence:visual?[visual]:[]};
    const r=await fetch(API+'/diagnose',{method:'POST',headers:jsonHeaders(),body:JSON.stringify(body)});const j=await r.json();
-   if(r.ok)setLast(j);else Alert.alert('RepairPilot',j.detail||'Diagnosis error');
+   if(r.ok){setLast(j);setAnswerInput('')}else Alert.alert('RepairPilot',j.detail||'Diagnosis error');
  };
- const answer=(a:string)=>{const h=[...history,{question:last.next_step.question,answer:a,risk:last.risk.level}];setHistory(h);next(h)};
+ const answer=(a:string)=>{if(!last?.next_step)return;const h=[...history,{question:last.next_step.question,answer:a,risk:last.risk.level}];setHistory(h);setAnswerInput('');next(h)};
+ const submitTypedAnswer=()=>{const a=answerInput.trim();if(a)answer(a)};
 
- const completeRepair=async()=>{
-   const payload={session_id:last?.session_id||null,outcome:(fix.trim()&&fix.trim()!=='Unresolved')?'fixed':'needs_work',equipment_id:selected.id,equipment_name:selected.name,symptom,history,fix:fix.trim()||'Unresolved',part:part.trim(),notes:notes.trim()};
+ const completeRepair=async(outcome:'fixed'|'needs_work')=>{
+   if(outcome==='fixed'&&!fix.trim())return Alert.alert('RepairPilot','Enter what fixed the problem before marking the repair fixed.');
+   const savedSessionId=last?.session_id||'';
+   const payload={session_id:savedSessionId||null,outcome,equipment_id:selected.id,equipment_name:selected.name,symptom,history,fix:fix.trim()||(outcome==='fixed'?'Fixed':'Unresolved'),part:part.trim(),notes:notes.trim()};
    const r=await fetch(API+'/repairs',{method:'POST',headers:jsonHeaders(),body:JSON.stringify(payload)});const j=await r.json();
    if(!r.ok)return Alert.alert('RepairPilot',j.detail||'Could not save repair');
-   await clearDraft();setFix('');setPart('');setNotes('');setLast(null);setHistory([]);setVisual(null);setScreen('home');
-   Alert.alert('RepairPilot','Repair saved to history.',[
-     {text:'Needs work',onPress:()=>sendFeedback(false,2)},
-     {text:'Fixed it',onPress:()=>sendFeedback(true,5)}
-   ]);
+   await sendFeedback(savedSessionId,outcome==='fixed',outcome==='fixed'?5:2);
+   await clearDraft();setFix('');setPart('');setNotes('');setLast(null);setHistory([]);setVisual(null);setAnswerInput('');setScreen('home');
+   Alert.alert('RepairPilot',outcome==='fixed'?'Confirmed fix saved to repair history.':'Repair saved as still needing work.');
  };
 
- const sendFeedback=async(success:boolean,rating:number)=>{
-   try{await fetch(API+'/feedback',{method:'POST',headers:jsonHeaders(),body:JSON.stringify({session_id:selected?.id||'',rating,success,comment:''})})}catch{}
+ const sendFeedback=async(sessionId:string,success:boolean,rating:number)=>{
+   if(!sessionId)return;
+   try{await fetch(API+'/feedback',{method:'POST',headers:jsonHeaders(),body:JSON.stringify({session_id:sessionId,rating,success,comment:''})})}catch{}
  };
  const loadHistory=async()=>{const r=await fetch(API+'/repairs',{headers:authHeaders()});if(r.ok)setRepairs(await r.json());setScreen('history')};
  const loadReviews=async()=>{const r=await fetch(API+'/reviews',{headers:authHeaders()});if(r.ok)setReviews(await r.json());setScreen('reviews')};
@@ -222,7 +225,8 @@ export default function App(){
   <TextInput style={s.input} placeholder="What fixed it?" placeholderTextColor="#70858b" value={fix} onChangeText={setFix}/>
   <TextInput style={s.input} placeholder="Part used (optional)" placeholderTextColor="#70858b" value={part} onChangeText={setPart}/>
   <TextInput style={[s.input,{minHeight:100}]} multiline placeholder="Notes" placeholderTextColor="#70858b" value={notes} onChangeText={setNotes}/>
-  <TouchableOpacity style={s.primary} onPress={completeRepair}><Text style={s.primaryText}>Save repair</Text></TouchableOpacity>
+  <TouchableOpacity style={s.primary} onPress={()=>completeRepair('fixed')}><Text style={s.primaryText}>Fixed — save confirmed repair</Text></TouchableOpacity>
+  <TouchableOpacity style={s.secondary} onPress={()=>completeRepair('needs_work')}><Text style={s.white}>Save — still needs work</Text></TouchableOpacity>
   <TouchableOpacity style={s.secondary} onPress={()=>setScreen('diagnose')}><Text style={s.white}>Back</Text></TouchableOpacity>
  </ScrollView></SafeAreaView>;
 
@@ -240,6 +244,10 @@ export default function App(){
    <View style={s.card}><Text style={s.tileTitle}>RepairPilot</Text><Text style={s.white}>{last.next_step?.question||last.notes_for_record}</Text><Text style={s.muted}>Risk: {last.risk?.level?.toUpperCase()}</Text></View>
    {last.evidence?.map((e:any,i:number)=><View key={i} style={s.evidence}><Text style={s.white}>{e.source}{e.citation?` — ${e.citation}`:''}</Text><Text style={s.muted}>{e.detail||''}</Text></View>)}
    {last.next_step?.choices?.map((c:string)=><TouchableOpacity key={c} style={s.secondary} onPress={()=>answer(c)}><Text style={s.white}>{c}</Text></TouchableOpacity>)}
+   {last.next_step && last.next_step.choices?.length===0 ? <>
+    <TextInput style={s.input} placeholder={last.next_step.answer_type==='measurement'?`Enter measurement${last.next_step.unit?` (${last.next_step.unit})`:''}`:'Enter your answer'} placeholderTextColor="#70858b" value={answerInput} onChangeText={setAnswerInput} keyboardType={last.next_step.answer_type==='measurement'?'decimal-pad':'default'} onSubmitEditing={submitTypedAnswer}/>
+    <TouchableOpacity style={s.secondary} onPress={submitTypedAnswer}><Text style={s.white}>Submit answer{last.next_step.unit?` (${last.next_step.unit})`:''}</Text></TouchableOpacity>
+   </>:null}
    <TouchableOpacity style={s.primary} onPress={()=>setScreen('complete')}><Text style={s.primaryText}>Repair complete / save outcome</Text></TouchableOpacity>
   </>}
   <TouchableOpacity style={s.secondary} onPress={()=>setScreen('equipment')}><Text style={s.white}>Back</Text></TouchableOpacity>

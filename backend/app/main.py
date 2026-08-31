@@ -1,9 +1,10 @@
 
 from pathlib import Path
 import shutil,tempfile,os,io
-from fastapi import FastAPI,UploadFile,File,Form,HTTPException,Header,Request
+from fastapi import FastAPI,UploadFile,File,Form,HTTPException,Request,Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse,JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pypdf import PdfReader
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
@@ -18,7 +19,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from .mailer import send_password_reset
-from .repository import backend_name
+from .repository import backend_name,connect
 
 if settings.sentry_dsn:
     import sentry_sdk
@@ -30,13 +31,28 @@ app.state.limiter=limiter
 app.add_exception_handler(RateLimitExceeded,_rate_limit_exceeded_handler)
 app.add_middleware(CORSMiddleware,allow_origins=settings.allowed_origins,allow_credentials=True,allow_methods=["GET","POST","PATCH"],allow_headers=["Authorization","Content-Type"])
 
-def user_from_header(authorization:str|None,admin=False):
-    if not authorization or not authorization.lower().startswith("bearer "):
+bearer_scheme=HTTPBearer(auto_error=False)
+
+def user_from_credentials(credentials:HTTPAuthorizationCredentials|None,admin=False):
+    if not credentials or credentials.scheme.lower()!="bearer":
         raise HTTPException(401,"Authentication required.")
-    u=decode_token(authorization.split(" ",1)[1])
-    if not u: raise HTTPException(401,"Invalid or expired token.")
+    claims=decode_token(credentials.credentials)
+    if not claims: raise HTTPException(401,"Invalid or expired token.")
+    account=get_user_by_id(claims.get("sub"))
+    if not account: raise HTTPException(401,"Account no longer exists.")
+    if int(claims.get("ver",0) or 0)!=int(account.get("token_version",0) or 0):
+        raise HTTPException(401,"Session has been invalidated. Please log in again.")
+    # Role and email come from the database, not stale JWT claims. This makes
+    # account deletion and role changes effective immediately.
+    u={"sub":account["id"],"email":account["email"],"role":account.get("role","tester")}
     if admin and u.get("role")!="admin": raise HTTPException(403,"Admin access required.")
     return u
+
+def current_user(credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
+    return user_from_credentials(credentials)
+
+def current_admin(credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
+    return user_from_credentials(credentials,admin=True)
 
 @app.get("/health")
 def health(): return {"ok":True,"mode":"ai" if os.getenv("OPENAI_API_KEY") else "demo","version":"0.9.0","env":settings.env,"storage":settings.storage_backend,"database":backend_name()}
@@ -45,9 +61,9 @@ def health(): return {"ok":True,"mode":"ai" if os.getenv("OPENAI_API_KEY") else 
 def register(payload:dict):
     email=str(payload.get("email","")).strip(); password=str(payload.get("password","")); invite=str(payload.get("invite_code","")).strip()
     if "@" not in email or len(password)<8: raise HTTPException(400,"Valid email and password of at least 8 characters required.")
-    if not consume_invite(invite): raise HTTPException(403,"Valid beta invite code required.")
-    user=create_user(email,password,"tester")
-    if not user: raise HTTPException(409,"Account already exists.")
+    user,reason=register_user_with_invite(email,password,invite,"tester")
+    if reason=="invite": raise HTTPException(403,"Valid beta invite code required.")
+    if reason=="exists": raise HTTPException(409,"Account already exists.")
     return {"token":token_for(user),"user":user}
 
 @app.post("/auth/login")
@@ -80,45 +96,53 @@ def password_reset_confirm(payload:dict):
     return {"ok":True}
 
 @app.get("/auth/me")
-def me(authorization:str|None=Header(default=None)):
-    u=user_from_header(authorization); return {"id":u["sub"],"email":u.get("email"),"role":u.get("role","tester")}
+def me(credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
+    u=user_from_credentials(credentials); return {"id":u["sub"],"email":u.get("email"),"role":u.get("role","tester")}
 
 @app.post("/admin/invites")
-def create_beta_invite(payload:dict,authorization:str|None=Header(default=None)):
-    u=user_from_header(authorization,admin=True)
+def create_beta_invite(payload:dict,credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
+    u=user_from_credentials(credentials,admin=True)
     return create_invite(u["sub"],max(1,min(100,int(payload.get("max_uses",1)))))
 
 @app.get("/admin/invites")
-def get_invites(authorization:str|None=Header(default=None)):
-    u=user_from_header(authorization,admin=True); return list_invites()
+def get_invites(credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
+    u=user_from_credentials(credentials,admin=True); return list_invites()
 
 @app.get("/equipment")
-def equipment(authorization:str|None=Header(default=None)):
-    u=user_from_header(authorization); return list_equipment(u["sub"])
+def equipment(credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
+    u=user_from_credentials(credentials); return list_equipment(u["sub"])
 
 @app.post("/equipment")
-def create_equipment(profile:EquipmentProfile,authorization:str|None=Header(default=None)):
-    u=user_from_header(authorization); out=add_equipment(u["sub"],profile.model_dump()); audit(u["sub"],"equipment.created","equipment",out["id"],{"name":out["name"]}); return out
+def create_equipment(profile:EquipmentProfile,credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
+    u=user_from_credentials(credentials); out=add_equipment(u["sub"],profile.model_dump()); audit(u["sub"],"equipment.created","equipment",out["id"],{"name":out["name"]}); return out
 
 @app.patch("/equipment/{equipment_id}")
-def patch_equipment(equipment_id:str,payload:dict,authorization:str|None=Header(default=None)):
-    u=user_from_header(authorization); out=update_equipment(u["sub"],equipment_id,payload)
+def patch_equipment(equipment_id:str,payload:dict,credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
+    u=user_from_credentials(credentials); out=update_equipment(u["sub"],equipment_id,payload)
     if not out: raise HTTPException(404,"Equipment not found.")
     return out
 
 @app.get("/repairs")
-def repairs(equipment_id:str|None=None,authorization:str|None=Header(default=None)):
-    u=user_from_header(authorization); return list_repairs(u["sub"],equipment_id)
+def repairs(equipment_id:str|None=None,credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
+    u=user_from_credentials(credentials); return list_repairs(u["sub"],equipment_id)
 
 @app.post("/repairs")
-def create_repair(payload:dict,authorization:str|None=Header(default=None)):
-    u=user_from_header(authorization); out=add_repair(u["sub"],payload)
-    mark_diagnostic_outcome(u["sub"],payload.get("session_id"),payload.get("outcome","fixed" if payload.get("fix") and payload.get("fix")!="Unresolved" else "needs_work"))
+def create_repair(payload:dict,credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
+    u=user_from_credentials(credentials)
+    equipment_id=payload.get("equipment_id")
+    if equipment_id and not get_equipment(u["sub"],str(equipment_id)):
+        raise HTTPException(404,"Equipment not found.")
+    outcome=str(payload.get("outcome","fixed" if payload.get("fix") and payload.get("fix")!="Unresolved" else "needs_work"))
+    if outcome not in {"fixed","needs_work"}:
+        raise HTTPException(400,"Outcome must be fixed or needs_work.")
+    payload={**payload,"outcome":outcome}
+    out=add_repair(u["sub"],payload)
+    mark_diagnostic_outcome(u["sub"],payload.get("session_id"),outcome)
     audit(u["sub"],"repair.saved","repair",out["id"],{"equipment_id":payload.get("equipment_id"),"fix":payload.get("fix","")}); return out
 
 @app.get("/repairs/{repair_id}/report.pdf")
-def repair_report(repair_id:str,authorization:str|None=Header(default=None)):
-    u=user_from_header(authorization)
+def repair_report(repair_id:str,credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
+    u=user_from_credentials(credentials)
     r=get_repair(u["sub"],repair_id)
     if not r: raise HTTPException(404,"Repair not found.")
     buf=io.BytesIO()
@@ -155,8 +179,8 @@ async def read_capped(file:UploadFile,max_bytes:int)->bytes:
 
 @app.post("/photos/analyze")
 @limiter.limit("20/minute")
-async def photo_analyze(request:Request,equipment_id:str=Form(...),file:UploadFile=File(...),authorization:str|None=Header(default=None)):
-    u=user_from_header(authorization)
+async def photo_analyze(request:Request,equipment_id:str=Form(...),file:UploadFile=File(...),credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
+    u=user_from_credentials(credentials)
     if not get_equipment(u["sub"],equipment_id): raise HTTPException(404,"Equipment not found.")
     if not (file.content_type or "").startswith("image/"): raise HTTPException(400,"Upload an image file.")
     data=await read_capped(file,settings.max_image_mb*1024*1024)
@@ -173,15 +197,15 @@ async def photo_analyze(request:Request,equipment_id:str=Form(...),file:UploadFi
     finally: temp.unlink(missing_ok=True)
 
 @app.get("/equipment/{equipment_id}/images")
-def images(equipment_id:str,authorization:str|None=Header(default=None)):
-    u=user_from_header(authorization)
+def images(equipment_id:str,credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
+    u=user_from_credentials(credentials)
     if not get_equipment(u["sub"],equipment_id): raise HTTPException(404,"Equipment not found.")
     return list_images(u["sub"],equipment_id)
 
 @app.post("/manuals/upload")
 @limiter.limit("10/minute")
-async def manual_upload(request:Request,equipment_id:str=Form(...),file:UploadFile=File(...),authorization:str|None=Header(default=None)):
-    u=user_from_header(authorization)
+async def manual_upload(request:Request,equipment_id:str=Form(...),file:UploadFile=File(...),credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
+    u=user_from_credentials(credentials)
     if not get_equipment(u["sub"],equipment_id): raise HTTPException(404,"Equipment not found.")
     if not (file.filename or "").lower().endswith(".pdf"): raise HTTPException(400,"PDF required.")
     data=await read_capped(file,settings.max_pdf_mb*1024*1024)
@@ -200,22 +224,27 @@ async def manual_upload(request:Request,equipment_id:str=Form(...),file:UploadFi
     finally:path.unlink(missing_ok=True)
 
 @app.get("/equipment/{equipment_id}/manuals")
-def manuals(equipment_id:str,authorization:str|None=Header(default=None)):
-    u=user_from_header(authorization)
+def manuals(equipment_id:str,credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
+    u=user_from_credentials(credentials)
     if not get_equipment(u["sub"],equipment_id): raise HTTPException(404,"Equipment not found.")
     return list_manuals(u["sub"],equipment_id)
 
 @app.get("/manuals/search")
-def manual_search_route(equipment_id:str,q:str,authorization:str|None=Header(default=None)):
-    u=user_from_header(authorization)
+def manual_search_route(equipment_id:str,q:str,credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
+    u=user_from_credentials(credentials)
     if not get_equipment(u["sub"],equipment_id): raise HTTPException(404,"Equipment not found.")
     return search_manual(u["sub"],equipment_id,q)
 
 @app.post("/diagnose",response_model=DiagnoseResponse)
 @limiter.limit("30/minute")
-def diagnose(request:Request,req:DiagnoseRequest,authorization:str|None=Header(default=None)):
-    u=user_from_header(authorization)
-    if req.equipment_profile.id and not get_equipment(u["sub"],req.equipment_profile.id): raise HTTPException(404,"Equipment not found.")
+def diagnose(request:Request,req:DiagnoseRequest,credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
+    u=user_from_credentials(credentials)
+    if req.equipment_profile.id:
+        stored=get_equipment(u["sub"],req.equipment_profile.id)
+        if not stored: raise HTTPException(404,"Equipment not found.")
+        # The database profile is authoritative; do not let a client spoof model details
+        # while referencing an existing equipment id.
+        req.equipment_profile=EquipmentProfile(**stored)
     query=req.symptom+" "+" ".join(x.answer for x in req.history[-3:])
     manual=search_manual(u["sub"],req.equipment_profile.id,query) if req.equipment_profile.id else []
     resp=run_diagnose(req,manual)
@@ -227,69 +256,83 @@ def diagnose(request:Request,req:DiagnoseRequest,authorization:str|None=Header(d
     return resp
 
 @app.get("/reviews")
-def reviews(authorization:str|None=Header(default=None)):
-    u=user_from_header(authorization); return list_reviews_for_user(u["sub"])
+def reviews(credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
+    u=user_from_credentials(credentials); return list_reviews_for_user(u["sub"])
 
 @app.get("/admin/reviews")
-def admin_reviews(authorization:str|None=Header(default=None)):
-    user_from_header(authorization,admin=True); return list_reviews_all()
+def admin_reviews(credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
+    user_from_credentials(credentials,admin=True); return list_reviews_all()
 
 @app.post("/admin/reviews/{review_id}/close")
-def review_close(review_id:str,payload:dict,authorization:str|None=Header(default=None)):
-    user_from_header(authorization,admin=True); return close_review(review_id,str(payload.get("note",""))[:4000])
+def review_close(review_id:str,payload:dict,credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
+    user_from_credentials(credentials,admin=True); return close_review(review_id,str(payload.get("note",""))[:4000])
 
 @app.post("/feedback")
-def feedback(payload:dict,authorization:str|None=Header(default=None)):
-    u=user_from_header(authorization)
+def feedback(payload:dict,credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
+    u=user_from_credentials(credentials)
+    session_id=str(payload.get("session_id","")).strip()
+    if session_id and not diagnostic_session_belongs_to_user(u["sub"],session_id):
+        raise HTTPException(404,"Diagnostic session not found.")
     rating=max(1,min(5,int(payload.get("rating",3))))
-    return add_feedback(u["sub"],str(payload.get("session_id","")),rating,bool(payload.get("success",False)),str(payload.get("comment",""))[:2000])
+    return add_feedback(u["sub"],session_id,rating,bool(payload.get("success",False)),str(payload.get("comment",""))[:2000])
 
 @app.get("/analytics")
-def analytics(authorization:str|None=Header(default=None)):
-    u=user_from_header(authorization); return feedback_stats(u["sub"])
+def analytics(credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
+    u=user_from_credentials(credentials); return feedback_stats(u["sub"])
 
 
 @app.get("/audit")
-def my_audit(authorization:str|None=Header(default=None)):
-    u=user_from_header(authorization); return audit_recent(u["sub"],100)
+def my_audit(credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
+    u=user_from_credentials(credentials); return audit_recent(u["sub"],100)
 
 @app.get("/admin/audit")
-def admin_audit(authorization:str|None=Header(default=None)):
-    user_from_header(authorization,admin=True); return audit_recent(None,200)
+def admin_audit(credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
+    user_from_credentials(credentials,admin=True); return audit_recent(None,200)
 
 
 @app.get("/account/export")
-def account_export(authorization:str|None=Header(default=None)):
-    u=user_from_header(authorization)
+def account_export(credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
+    u=user_from_credentials(credentials)
     audit(u["sub"],"account.exported","user",u["sub"],{})
     return export_user_data(u["sub"])
 
 @app.delete("/account")
-def account_delete(authorization:str|None=Header(default=None)):
-    u=user_from_header(authorization)
+def account_delete(credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
+    u=user_from_credentials(credentials)
     storage_result=delete_prefix(u["sub"])
     delete_user_data(u["sub"])
     return {"ok":True,"storage_cleanup":storage_result}
 
 @app.get("/admin/metrics")
-def metrics(authorization:str|None=Header(default=None)):
-    user_from_header(authorization,admin=True)
+def metrics(credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
+    user_from_credentials(credentials,admin=True)
     return admin_metrics()
 
 
 @app.get("/ready")
 def ready():
-    return {
-        "ok":True,
+    db_ok=False
+    try:
+        with connect() as c:
+            c.execute("SELECT 1").fetchone()
+        db_ok=True
+    except Exception:
+        db_ok=False
+    storage_configured=(settings.storage_backend!="supabase" or bool(settings.supabase_url and settings.supabase_service_key))
+    payload={
+        "ok":db_ok and storage_configured,
         "environment":settings.env,
         "database":backend_name(),
+        "database_reachable":db_ok,
         "storage":settings.storage_backend,
+        "storage_configured":storage_configured,
         "ai_configured":bool(os.getenv("OPENAI_API_KEY")),
         "error_reporting":bool(settings.sentry_dsn)
     }
+    return JSONResponse(status_code=200 if payload["ok"] else 503,content=payload)
 
 
 @app.get("/admin/unresolved")
-def unresolved(authorization:str|None=Header(default=None),limit:int=100):
-    user_from_header(authorization,admin=True)
+def unresolved(credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme),limit:int=100):
+    user_from_credentials(credentials,admin=True)
     return list_unresolved(max(1,min(limit,500)))

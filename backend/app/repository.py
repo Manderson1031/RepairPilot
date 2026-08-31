@@ -19,7 +19,7 @@ def _pg_url()->str:
 
 def adapt_sql(sql:str)->str:
     """Translate the small qmark SQL subset used by RepairPilot to psycopg format."""
-    return sql.replace("invite_codes","repairpilot.invite_codes").replace("?","%s") if backend_name()=="postgres" else sql
+    return sql.replace("?","%s") if backend_name()=="postgres" else sql
 
 class Database(AbstractContextManager):
     def __init__(self):

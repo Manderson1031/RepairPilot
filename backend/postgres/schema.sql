@@ -2,8 +2,10 @@ CREATE SCHEMA IF NOT EXISTS repairpilot;
 SET search_path TO repairpilot, public;
 
 CREATE TABLE IF NOT EXISTS users(
- id text PRIMARY KEY,email text UNIQUE NOT NULL,password_hash text NOT NULL,role text DEFAULT 'tester',created bigint NOT NULL
+ id text PRIMARY KEY,email text UNIQUE NOT NULL,password_hash text NOT NULL,role text DEFAULT 'tester',created bigint NOT NULL,
+ token_version integer NOT NULL DEFAULT 0
 );
+ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version integer NOT NULL DEFAULT 0;
 CREATE TABLE IF NOT EXISTS invite_codes(
  code text PRIMARY KEY,created_by text,max_uses integer,uses integer DEFAULT 0,active integer DEFAULT 1,created bigint
 );
@@ -54,8 +56,17 @@ CREATE INDEX IF NOT EXISTS idx_repairs_user ON repairs_v2(user_id);
 CREATE INDEX IF NOT EXISTS idx_manuals_user_equipment ON manuals_v2(user_id,equipment_id);
 CREATE INDEX IF NOT EXISTS idx_images_user_equipment ON image_history(user_id,equipment_id);
 CREATE INDEX IF NOT EXISTS idx_reviews_status ON review_queue(status);
+CREATE INDEX IF NOT EXISTS idx_reviews_user ON review_queue(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_user_created ON audit_log(user_id,created);
+CREATE INDEX IF NOT EXISTS idx_blobs_user ON blobs(user_id);
+CREATE INDEX IF NOT EXISTS idx_feedback_user ON feedback(user_id);
+CREATE INDEX IF NOT EXISTS idx_password_reset_user ON password_reset_tokens(user_id);
 
 
+-- RepairPilot uses a server-side PostgreSQL connection. Client Supabase roles must
+-- not be able to access these tables directly even though RLS is intentionally not
+-- part of the app's authorization model.
+REVOKE ALL ON SCHEMA repairpilot FROM PUBLIC;
+REVOKE ALL ON ALL TABLES IN SCHEMA repairpilot FROM PUBLIC;
 REVOKE ALL ON SCHEMA repairpilot FROM anon, authenticated;
 REVOKE ALL ON ALL TABLES IN SCHEMA repairpilot FROM anon, authenticated;

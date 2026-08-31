@@ -14,6 +14,15 @@ YELLOW = [r"\bmultimeter\b", r"\bvoltage\b", r"\bresistance\b", r"\bcontinuity\b
 
 def enforce(resp: DiagnoseResponse) -> DiagnoseResponse:
     q = (resp.next_step.question if resp.next_step else "").lower()
+    # Red is a hard stop in RepairPilot. The model may classify a proposed step
+    # as red, but the UI must never present that step as something to perform.
+    if resp.risk.level=="red" or resp.status=="escalate":
+        return DiagnoseResponse(
+            status="escalate", next_step=None,
+            risk=Risk(level="red",reason=resp.risk.reason or "This step requires qualified service.",requires_qualified_technician=True),
+            evidence=resp.evidence, working_hypotheses=resp.working_hypotheses,
+            notes_for_record=resp.notes_for_record or "RepairPilot escalated a red-risk diagnostic step."
+        )
     if any(re.search(p, q) for p in RED):
         return DiagnoseResponse(
             status="escalate", next_step=None,

@@ -32,7 +32,7 @@ def analyze_image(path:Path, filename:str, upload_id:str)->PhotoAnalysisResponse
       }
     }
     resp=client.responses.create(
-      model=os.getenv("REPAIRPILOT_VISION_MODEL",os.getenv("REPAIRPILOT_MODEL","gpt-5.5")),
+      model=os.getenv("REPAIRPILOT_VISION_MODEL","gpt-5.6-terra"),
       instructions="""Analyze this repair-equipment photo conservatively.
 Identify visible equipment/components and readable nameplate text.
 Do not invent model numbers, ratings, terminals, or hidden components.
