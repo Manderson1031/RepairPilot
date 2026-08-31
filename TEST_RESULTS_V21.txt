@@ -1,0 +1,6 @@
+RepairPilot V21 verification
+
+- Backend tests with local no-op SlowAPI shim: 27 passed
+- Python compileall: PASS
+- SlowAPI is listed in production requirements; shim was used only because the current build environment does not have the package installed.
+- See PREFLIGHT_RESULTS_V21.txt for release preflight output.

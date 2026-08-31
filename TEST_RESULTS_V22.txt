@@ -1,0 +1,8 @@
+RepairPilot V22 verification
+
+- Backend regression tests with local no-op SlowAPI shim: 27 passed
+- Python compileall: PASS
+- Release preflight: 16 passed, 1 warning, 0 failures
+- Mobile dependency manifest aligned to current Expo SDK 57 documentation for ImagePicker, DocumentPicker, SecureStore, FileSystem, Sharing, Linking, and AsyncStorage.
+- npm dependency installation could not be completed in the current build container because the package fetch timed out. Run `npm install` and `npm run check` in the connected Codespace before the device smoke test.
+- SlowAPI is listed in production requirements; shim was used only because the current build environment does not have the package installed.

@@ -1,0 +1,13 @@
+RepairPilot V20 verification
+
+Backend pytest: 26 passed in 1.54s
+- Executed with a local no-op SlowAPI shim because this isolated build environment cannot install packages from the network.
+- Production requirements continue to include slowapi>=0.1.9.
+
+Python compileall: PASS
+Mobile TypeScript compile: not rerun in this isolated workspace because mobile/node_modules is not present. V20 contains no mobile source changes.
+
+New V20 coverage:
+- Cross-user diagnostic session cannot be attached to a repair.
+- Full equipment -> diagnose -> session -> repair -> feedback lifecycle.
+- Lifecycle test includes nullable stored equipment fields to retain V19 regression coverage.

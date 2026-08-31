@@ -26,7 +26,7 @@ if settings.sentry_dsn:
     sentry_sdk.init(dsn=settings.sentry_dsn,traces_sample_rate=0.05,environment=settings.env)
 run_migrations()
 limiter=Limiter(key_func=get_remote_address,default_limits=[settings.rate_limit])
-app=FastAPI(title="RepairPilot API",version="0.9.1")
+app=FastAPI(title="RepairPilot API",version="0.9.3")
 app.state.limiter=limiter
 app.add_exception_handler(RateLimitExceeded,_rate_limit_exceeded_handler)
 app.add_middleware(CORSMiddleware,allow_origins=settings.allowed_origins,allow_credentials=True,allow_methods=["GET","POST","PATCH"],allow_headers=["Authorization","Content-Type"])
@@ -55,7 +55,7 @@ def current_admin(credentials:HTTPAuthorizationCredentials|None=Depends(bearer_s
     return user_from_credentials(credentials,admin=True)
 
 @app.get("/health")
-def health(): return {"ok":True,"mode":"ai" if os.getenv("OPENAI_API_KEY") else "demo","version":"0.9.1","env":settings.env,"storage":settings.storage_backend,"database":backend_name()}
+def health(): return {"ok":True,"mode":"ai" if os.getenv("OPENAI_API_KEY") else "demo","version":"0.9.3","env":settings.env,"storage":settings.storage_backend,"database":backend_name()}
 
 @app.post("/auth/register")
 def register(payload:dict):
@@ -132,6 +132,9 @@ def create_repair(payload:dict,credentials:HTTPAuthorizationCredentials|None=Dep
     equipment_id=payload.get("equipment_id")
     if equipment_id and not get_equipment(u["sub"],str(equipment_id)):
         raise HTTPException(404,"Equipment not found.")
+    session_id=str(payload.get("session_id") or "").strip()
+    if session_id and not diagnostic_session_belongs_to_user(u["sub"],session_id):
+        raise HTTPException(404,"Diagnostic session not found.")
     outcome=str(payload.get("outcome","fixed" if payload.get("fix") and payload.get("fix")!="Unresolved" else "needs_work"))
     if outcome not in {"fixed","needs_work"}:
         raise HTTPException(400,"Outcome must be fixed or needs_work.")

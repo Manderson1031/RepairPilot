@@ -25,6 +25,8 @@ export default function App(){
  const [email,setEmail]=useState(''),[password,setPassword]=useState(''),[invite,setInvite]=useState('');
  const [equipment,setEquipment]=useState<any[]>([]);
  const [newName,setNewName]=useState(''),[newCat,setNewCat]=useState('Small engine');
+ const [newManufacturer,setNewManufacturer]=useState(''),[newModel,setNewModel]=useState(''),[newSerial,setNewSerial]=useState('');
+ const [busy,setBusy]=useState('');
  const [selected,setSelected]=useState<any>(null);
  const [symptom,setSymptom]=useState(''),[history,setHistory]=useState<any[]>([]),[last,setLast]=useState<any>(null),[visual,setVisual]=useState<any>(null);
  const [answerInput,setAnswerInput]=useState('');
@@ -33,6 +35,24 @@ export default function App(){
 
  const authHeaders=()=>({Authorization:`Bearer ${token}`});
  const jsonHeaders=()=>({'Content-Type':'application/json',Authorization:`Bearer ${token}`});
+
+ const signedFetch=async(path:string,init:any={})=>{
+   const controller=new AbortController();
+   const timer=setTimeout(()=>controller.abort(),25000);
+   try{
+    const headers={...(init.headers||{}),Authorization:`Bearer ${token}`};
+    const r=await fetch(API+path,{...init,headers,signal:controller.signal});
+    if(r.status===401){
+      await SecureStore.deleteItemAsync(TOKEN_KEY);setToken('');setScreen('auth');
+      throw new Error('Your session expired. Please log in again.');
+    }
+    return r;
+   }catch(e:any){
+    if(e?.name==='AbortError')throw new Error('RepairPilot timed out contacting the server. Check your connection and try again.');
+    throw e;
+   }finally{clearTimeout(timer)}
+ };
+ const runBusy=async(key:string,work:()=>Promise<void>)=>{if(busy)return;setBusy(key);try{await work()}finally{setBusy('')}};
 
  useEffect(()=>{rehydrate();const sub=Linking.addEventListener('url',e=>handleUrl(e.url));Linking.getInitialURL().then(u=>u&&handleUrl(u));return()=>sub.remove()},[]);
  useEffect(()=>{if(screen==='diagnose'&&selected)saveDraft()},[selected,symptom,history,last,visual,screen]);
@@ -53,7 +73,7 @@ export default function App(){
  };
 
  const requestReset=async()=>{if(!email.trim())return Alert.alert('RepairPilot','Enter your email first.');const r=await fetch(API+'/auth/password-reset/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});const j=await r.json();Alert.alert('RepairPilot',j.message||'If the account exists, reset instructions can be sent.');if(j.development_reset_link)handleUrl(j.development_reset_link)};
- const confirmReset=async()=>{const r=await fetch(API+'/auth/password-reset/confirm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:resetToken,new_password:newPassword})});const j=await r.json();if(r.ok){setResetToken('');setNewPassword('');setScreen('auth');Alert.alert('RepairPilot','Password changed. You can log in now.')}else Alert.alert('RepairPilot',j.detail||'Reset failed')};
+ const confirmReset=async()=>{if(newPassword.length<8)return Alert.alert('RepairPilot','Use a password with at least 8 characters.');const r=await fetch(API+'/auth/password-reset/confirm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:resetToken,new_password:newPassword})});const j=await r.json();if(r.ok){setResetToken('');setNewPassword('');setScreen('auth');Alert.alert('RepairPilot','Password changed. You can log in now.')}else Alert.alert('RepairPilot',j.detail||'Reset failed')};
  const auth=async(register=false)=>{
    try{
     const body:any={email,password};if(register)body.invite_code=invite;
@@ -75,60 +95,78 @@ export default function App(){
  };
  const clearDraft=async()=>{await AsyncStorage.removeItem(DRAFT_KEY)};
 
- const loadEquipment=async()=>{const r=await fetch(API+'/equipment',{headers:authHeaders()});if(r.ok)setEquipment(await r.json())};
- const addEquipment=async()=>{
-   if(!newName.trim())return;
-   const r=await fetch(API+'/equipment',{method:'POST',headers:jsonHeaders(),body:JSON.stringify({name:newName,category:newCat,manufacturer:'',model:'',serial:'',notes:''})});
-   if(r.ok){setNewName('');await loadEquipment();}
- };
+ const loadEquipment=async()=>{try{const r=await signedFetch('/equipment');if(!r.ok)throw new Error('Could not load equipment');setEquipment(await r.json())}catch(e:any){Alert.alert('RepairPilot',e.message)}};
+ const addEquipment=async()=>runBusy('equipment',async()=>{
+   if(!newName.trim()){Alert.alert('RepairPilot','Enter an equipment name.');return}
+   try{
+    const r=await signedFetch('/equipment',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:newName.trim(),category:newCat.trim(),manufacturer:newManufacturer.trim(),model:newModel.trim(),serial:newSerial.trim(),notes:''})});
+    const j=await r.json();if(!r.ok)throw new Error(j.detail||'Could not add equipment');
+    setNewName('');setNewManufacturer('');setNewModel('');setNewSerial('');await loadEquipment();
+   }catch(e:any){Alert.alert('RepairPilot',e.message)}
+ });
  const openEquipment=(e:any)=>{setSelected(e);setScreen('diagnose');setSymptom('');setHistory([]);setLast(null);setVisual(null)};
 
- const takePhoto=async()=>{
-   const perm=await ImagePicker.requestCameraPermissionsAsync();if(!perm.granted)return Alert.alert('Camera permission required');
-   const result=await ImagePicker.launchCameraAsync({quality:.7});if(result.canceled)return;
-   const asset=result.assets[0],fd=new FormData();fd.append('equipment_id',selected.id);
+ const analyzePhotoAsset=async(asset:any)=>{
+   const fd=new FormData();fd.append('equipment_id',selected.id);
    fd.append('file',{uri:asset.uri,name:asset.fileName||'repairpilot.jpg',type:asset.mimeType||'image/jpeg'} as any);
-   const r=await fetch(API+'/photos/analyze',{method:'POST',headers:authHeaders(),body:fd});const j=await r.json();
-   if(r.ok)setVisual(j);else Alert.alert('Photo',j.detail||'Photo analysis failed');
+   const r=await signedFetch('/photos/analyze',{method:'POST',body:fd});const j=await r.json();
+   if(r.ok)setVisual(j);else throw new Error(j.detail||'Photo analysis failed');
  };
+ const takePhoto=async()=>runBusy('photo',async()=>{
+   try{
+    const perm=await ImagePicker.requestCameraPermissionsAsync();if(!perm.granted){Alert.alert('RepairPilot','Camera permission is required to take an equipment photo.');return}
+    const result=await ImagePicker.launchCameraAsync({quality:.7,mediaTypes:['images']});if(result.canceled)return;
+    await analyzePhotoAsset(result.assets[0]);
+   }catch(e:any){Alert.alert('RepairPilot',e.message)}
+ });
+ const choosePhoto=async()=>runBusy('photo',async()=>{
+   try{
+    const result=await ImagePicker.launchImageLibraryAsync({quality:.7,mediaTypes:['images'],allowsMultipleSelection:false});if(result.canceled)return;
+    await analyzePhotoAsset(result.assets[0]);
+   }catch(e:any){Alert.alert('RepairPilot',e.message)}
+ });
 
- const uploadManual=async()=>{
+ const uploadManual=async()=>runBusy('manual',async()=>{
    const result=await DocumentPicker.getDocumentAsync({type:'application/pdf',copyToCacheDirectory:true});if(result.canceled)return;
    const asset=result.assets[0],fd=new FormData();fd.append('equipment_id',selected.id);
    fd.append('file',{uri:asset.uri,name:asset.name,type:asset.mimeType||'application/pdf'} as any);
-   const r=await fetch(API+'/manuals/upload',{method:'POST',headers:authHeaders(),body:fd});const j=await r.json();
-   Alert.alert('RepairPilot',r.ok?`Indexed ${j.pages_parsed} pages from ${j.name}`:(j.detail||'Upload failed'));
- };
+   try{const r=await signedFetch('/manuals/upload',{method:'POST',body:fd});const j=await r.json();
+   Alert.alert('RepairPilot',r.ok?`Indexed ${j.pages_parsed} pages from ${j.name}`:(j.detail||'Upload failed'))}catch(e:any){Alert.alert('RepairPilot',e.message)}
+ });
 
- const next=async(h=history)=>{
-   const body={session_id:last?.session_id||null,equipment_profile:{id:selected.id,name:selected.name,manufacturer:selected.manufacturer||'',model:selected.model||'',serial:selected.serial||'',category:selected.category||'',notes:selected.notes||''},symptom,history:h,visual_evidence:visual?[visual]:[]};
-   const r=await fetch(API+'/diagnose',{method:'POST',headers:jsonHeaders(),body:JSON.stringify(body)});const j=await r.json();
-   if(r.ok){setLast(j);setAnswerInput('')}else Alert.alert('RepairPilot',j.detail||'Diagnosis error');
- };
+ const next=async(h=history)=>runBusy('diagnose',async()=>{
+   if(!selected?.id)return Alert.alert('RepairPilot','Choose an equipment profile first.');
+   if(!symptom.trim())return Alert.alert('RepairPilot','Describe the symptom before starting diagnosis.');
+   const body={session_id:last?.session_id||null,equipment_profile:{id:selected.id,name:selected.name,manufacturer:selected.manufacturer||'',model:selected.model||'',serial:selected.serial||'',category:selected.category||'',notes:selected.notes||''},symptom:symptom.trim(),history:h,visual_evidence:visual?[visual]:[]};
+   try{const r=await signedFetch('/diagnose',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json();
+   if(r.ok){setLast(j);setAnswerInput('')}else Alert.alert('RepairPilot',j.detail||'Diagnosis error')}catch(e:any){Alert.alert('RepairPilot',e.message)}
+ });
  const answer=(a:string)=>{if(!last?.next_step)return;const h=[...history,{question:last.next_step.question,answer:a,risk:last.risk.level}];setHistory(h);setAnswerInput('');next(h)};
  const submitTypedAnswer=()=>{const a=answerInput.trim();if(a)answer(a)};
 
- const completeRepair=async(outcome:'fixed'|'needs_work')=>{
+ const completeRepair=async(outcome:'fixed'|'needs_work')=>runBusy('repair',async()=>{
    if(outcome==='fixed'&&!fix.trim())return Alert.alert('RepairPilot','Enter what fixed the problem before marking the repair fixed.');
-   const savedSessionId=last?.session_id||'';
-   const payload={session_id:savedSessionId||null,outcome,equipment_id:selected.id,equipment_name:selected.name,symptom,history,fix:fix.trim()||(outcome==='fixed'?'Fixed':'Unresolved'),part:part.trim(),notes:notes.trim()};
-   const r=await fetch(API+'/repairs',{method:'POST',headers:jsonHeaders(),body:JSON.stringify(payload)});const j=await r.json();
-   if(!r.ok)return Alert.alert('RepairPilot',j.detail||'Could not save repair');
-   await sendFeedback(savedSessionId,outcome==='fixed',outcome==='fixed'?5:2);
-   await clearDraft();setFix('');setPart('');setNotes('');setLast(null);setHistory([]);setVisual(null);setAnswerInput('');setScreen('home');
-   Alert.alert('RepairPilot',outcome==='fixed'?'Confirmed fix saved to repair history.':'Repair saved as still needing work.');
- };
+   try{
+    const savedSessionId=last?.session_id||'';
+    const payload={session_id:savedSessionId||null,outcome,equipment_id:selected.id,equipment_name:selected.name,symptom,history,fix:fix.trim()||(outcome==='fixed'?'Fixed':'Unresolved'),part:part.trim(),notes:notes.trim()};
+    const r=await signedFetch('/repairs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const j=await r.json();
+    if(!r.ok)throw new Error(j.detail||'Could not save repair');
+    await sendFeedback(savedSessionId,outcome==='fixed',outcome==='fixed'?5:2);
+    await clearDraft();setFix('');setPart('');setNotes('');setLast(null);setHistory([]);setVisual(null);setAnswerInput('');setScreen('home');
+    Alert.alert('RepairPilot',outcome==='fixed'?'Confirmed fix saved to repair history.':'Repair saved as still needing work.');
+   }catch(e:any){Alert.alert('RepairPilot',e.message)}
+ });
 
  const sendFeedback=async(sessionId:string,success:boolean,rating:number)=>{
    if(!sessionId)return;
-   try{await fetch(API+'/feedback',{method:'POST',headers:jsonHeaders(),body:JSON.stringify({session_id:sessionId,rating,success,comment:''})})}catch{}
+   try{await signedFetch('/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:sessionId,rating,success,comment:''})})}catch{}
  };
- const loadHistory=async()=>{const r=await fetch(API+'/repairs',{headers:authHeaders()});if(r.ok)setRepairs(await r.json());setScreen('history')};
- const loadReviews=async()=>{const r=await fetch(API+'/reviews',{headers:authHeaders()});if(r.ok)setReviews(await r.json());setScreen('reviews')};
+ const loadHistory=async()=>{try{const r=await signedFetch('/repairs');if(!r.ok)throw new Error('Could not load repair history');setRepairs(await r.json());setScreen('history')}catch(e:any){Alert.alert('RepairPilot',e.message)}};
+ const loadReviews=async()=>{try{const r=await signedFetch('/reviews');if(!r.ok)throw new Error('Could not load review queue');setReviews(await r.json());setScreen('reviews')}catch(e:any){Alert.alert('RepairPilot',e.message)}};
 
  const shareAccountExport=async()=>{
    try{
-    const r=await fetch(API+'/account/export',{headers:authHeaders()});const data=await r.json();if(!r.ok)throw new Error(data.detail||'Export failed');
+    const r=await signedFetch('/account/export');const data=await r.json();if(!r.ok)throw new Error(data.detail||'Export failed');
     const file=new File(Paths.cache,'RepairPilot_Account_Export.json');if(file.exists)file.delete();file.create();file.write(JSON.stringify(data,null,2));
     if(await Sharing.isAvailableAsync())await Sharing.shareAsync(file.uri,{mimeType:'application/json',dialogTitle:'Share RepairPilot data export'});
     setAccountExport('ready');
@@ -136,7 +174,7 @@ export default function App(){
  };
  const shareReport=async(repair:any)=>{
    try{
-    const r=await fetch(API+`/repairs/${repair.id}/report.pdf`,{headers:authHeaders()});if(!r.ok)throw new Error('Report download failed');
+    const r=await signedFetch(`/repairs/${repair.id}/report.pdf`);if(!r.ok)throw new Error('Report download failed');
     const bytes=new Uint8Array(await r.arrayBuffer());
     const file=new File(Paths.cache,`RepairPilot_${repair.id}.pdf`);
     if(file.exists)file.delete();
@@ -193,7 +231,7 @@ export default function App(){
   {accountExport?<View style={s.evidence}><Text style={s.muted}>Account export created and handed to the device share sheet.</Text></View>:null}
   <TouchableOpacity style={s.secondary} onPress={()=>Alert.alert('Delete account','This permanently deletes your RepairPilot account and associated beta records.',[
     {text:'Cancel',style:'cancel'},
-    {text:'Delete',style:'destructive',onPress:async()=>{const r=await fetch(API+'/account',{method:'DELETE',headers:authHeaders()});if(r.ok){await SecureStore.deleteItemAsync(TOKEN_KEY);await AsyncStorage.removeItem(DRAFT_KEY);setToken('');setScreen('auth')}else Alert.alert('RepairPilot','Account deletion failed')}}
+    {text:'Delete',style:'destructive',onPress:async()=>{const r=await signedFetch('/account',{method:'DELETE'});if(r.ok){await SecureStore.deleteItemAsync(TOKEN_KEY);await AsyncStorage.removeItem(DRAFT_KEY);setToken('');setScreen('auth')}else Alert.alert('RepairPilot','Account deletion failed')}}
   ])}><Text style={s.white}>Delete my account</Text></TouchableOpacity>
   <View style={s.card}><Text style={s.tileTitle}>Safety</Text><Text style={s.muted}>RepairPilot is an assistant. Follow manufacturer procedures and workplace lockout/tagout rules. Do not bypass guards, interlocks, emergency stops, or other safety devices. Red steps require escalation.</Text></View>
   <TouchableOpacity style={s.secondary} onPress={()=>setScreen('home')}><Text style={s.white}>Back</Text></TouchableOpacity>
@@ -202,9 +240,12 @@ export default function App(){
  if(screen==='equipment')return <SafeAreaView style={s.safe}><ScrollView contentContainerStyle={s.wrap}>
   <Text style={s.title}>My Equipment</Text>
   <TextInput style={s.input} placeholder="Equipment name" placeholderTextColor="#70858b" value={newName} onChangeText={setNewName}/>
+  <TextInput style={s.input} placeholder="Manufacturer (recommended)" placeholderTextColor="#70858b" value={newManufacturer} onChangeText={setNewManufacturer}/>
+  <TextInput style={s.input} placeholder="Model (recommended)" placeholderTextColor="#70858b" value={newModel} onChangeText={setNewModel}/>
+  <TextInput style={s.input} placeholder="Serial number (optional)" placeholderTextColor="#70858b" value={newSerial} onChangeText={setNewSerial}/>
   <TextInput style={s.input} placeholder="Category" placeholderTextColor="#70858b" value={newCat} onChangeText={setNewCat}/>
-  <TouchableOpacity style={s.primary} onPress={addEquipment}><Text style={s.primaryText}>Add equipment</Text></TouchableOpacity>
-  {equipment.map(e=><TouchableOpacity key={e.id} style={s.card} onPress={()=>openEquipment(e)}><Text style={s.tileTitle}>{e.name}</Text><Text style={s.muted}>{e.category}</Text><Text style={s.link}>Open repair workspace →</Text></TouchableOpacity>)}
+  <TouchableOpacity style={[s.primary,busy? s.disabled:null]} disabled={!!busy} onPress={addEquipment}><Text style={s.primaryText}>{busy==='equipment'?'Saving…':'Add equipment'}</Text></TouchableOpacity>
+  {equipment.map(e=><TouchableOpacity key={e.id} style={s.card} onPress={()=>openEquipment(e)}><Text style={s.tileTitle}>{e.name}</Text><Text style={s.muted}>{[e.manufacturer,e.model].filter(Boolean).join(' ')||e.category}</Text><Text style={s.link}>Open repair workspace →</Text></TouchableOpacity>)}
   <TouchableOpacity style={s.secondary} onPress={()=>setScreen('home')}><Text style={s.white}>Back</Text></TouchableOpacity>
  </ScrollView></SafeAreaView>;
 
@@ -233,22 +274,24 @@ export default function App(){
  return <SafeAreaView style={s.safe}><ScrollView contentContainerStyle={s.wrap}>
   <Text style={s.title}>{selected?.name}</Text>
   <View style={s.row}>
-   <TouchableOpacity style={s.secondaryHalf} onPress={takePhoto}><Text style={s.white}>Take Photo</Text></TouchableOpacity>
-   <TouchableOpacity style={s.secondaryHalf} onPress={uploadManual}><Text style={s.white}>Add Manual</Text></TouchableOpacity>
+   <TouchableOpacity style={[s.secondaryHalf,busy? s.disabled:null]} disabled={!!busy} onPress={takePhoto}><Text style={s.white}>{busy==='photo'?'Analyzing…':'Take Photo'}</Text></TouchableOpacity>
+   <TouchableOpacity style={[s.secondaryHalf,busy? s.disabled:null]} disabled={!!busy} onPress={choosePhoto}><Text style={s.white}>Choose Photo</Text></TouchableOpacity>
   </View>
+  <TouchableOpacity style={[s.secondary,busy? s.disabled:null]} disabled={!!busy} onPress={uploadManual}><Text style={s.white}>{busy==='manual'?'Uploading…':'Add Manual PDF'}</Text></TouchableOpacity>
   {visual&&<View style={s.evidence}><Text style={s.white}>{visual.description}</Text><Text style={s.muted}>Vision confidence: {Math.round((visual.confidence||0)*100)}%</Text></View>}
   {!last?<>
    <TextInput style={[s.input,{minHeight:110}]} multiline placeholder="Describe exactly what the machine is doing" placeholderTextColor="#70858b" value={symptom} onChangeText={setSymptom}/>
-   <TouchableOpacity style={s.primary} onPress={()=>symptom.trim()&&next()}><Text style={s.primaryText}>Start diagnosis</Text></TouchableOpacity>
+   <TouchableOpacity style={[s.primary,busy? s.disabled:null]} disabled={!!busy} onPress={()=>next()}><Text style={s.primaryText}>{busy==='diagnose'?'Thinking…':'Start diagnosis'}</Text></TouchableOpacity>
   </>:<>
    <View style={s.card}><Text style={s.tileTitle}>RepairPilot</Text><Text style={s.white}>{last.next_step?.question||last.notes_for_record}</Text><Text style={s.muted}>Risk: {last.risk?.level?.toUpperCase()}</Text></View>
    {last.evidence?.map((e:any,i:number)=><View key={i} style={s.evidence}><Text style={s.white}>{e.source}{e.citation?` — ${e.citation}`:''}</Text><Text style={s.muted}>{e.detail||''}</Text></View>)}
-   {last.next_step?.choices?.map((c:string)=><TouchableOpacity key={c} style={s.secondary} onPress={()=>answer(c)}><Text style={s.white}>{c}</Text></TouchableOpacity>)}
-   {last.next_step && last.next_step.choices?.length===0 ? <>
+   {last.status==='ask'&&last.risk?.level!=='red'&&last.next_step?.choices?.map((c:string)=><TouchableOpacity key={c} disabled={!!busy} style={[s.secondary,busy? s.disabled:null]} onPress={()=>answer(c)}><Text style={s.white}>{c}</Text></TouchableOpacity>)}
+   {last.status==='ask'&&last.risk?.level!=='red'&&last.next_step && last.next_step.choices?.length===0 ? <>
     <TextInput style={s.input} placeholder={last.next_step.answer_type==='measurement'?`Enter measurement${last.next_step.unit?` (${last.next_step.unit})`:''}`:'Enter your answer'} placeholderTextColor="#70858b" value={answerInput} onChangeText={setAnswerInput} keyboardType={last.next_step.answer_type==='measurement'?'decimal-pad':'default'} onSubmitEditing={submitTypedAnswer}/>
-    <TouchableOpacity style={s.secondary} onPress={submitTypedAnswer}><Text style={s.white}>Submit answer{last.next_step.unit?` (${last.next_step.unit})`:''}</Text></TouchableOpacity>
+    <TouchableOpacity style={[s.secondary,busy? s.disabled:null]} disabled={!!busy} onPress={submitTypedAnswer}><Text style={s.white}>{busy==='diagnose'?'Thinking…':`Submit answer${last.next_step.unit?` (${last.next_step.unit})`:''}`}</Text></TouchableOpacity>
    </>:null}
-   <TouchableOpacity style={s.primary} onPress={()=>setScreen('complete')}><Text style={s.primaryText}>Repair complete / save outcome</Text></TouchableOpacity>
+   {last.status==='escalate'||last.risk?.level==='red'?<View style={s.stopBox}><Text style={s.stopTitle}>STOP / ESCALATE</Text><Text style={s.white}>{last.risk?.reason||'This step requires a qualified technician.'}</Text></View>:null}
+   <TouchableOpacity style={s.primary} onPress={()=>setScreen('complete')}><Text style={s.primaryText}>{last.status==='complete'?'Save repair outcome':'Repair complete / save outcome'}</Text></TouchableOpacity>
   </>}
   <TouchableOpacity style={s.secondary} onPress={()=>setScreen('equipment')}><Text style={s.white}>Back</Text></TouchableOpacity>
  </ScrollView></SafeAreaView>
@@ -263,5 +306,6 @@ const s=StyleSheet.create({
  input:{backgroundColor:'#0d232a',borderColor:'#20404a',borderWidth:1,borderRadius:13,padding:14,color:'#fff',fontSize:16,marginBottom:10},
  primary:{backgroundColor:'#36c45b',borderRadius:13,padding:15,marginTop:8},primaryText:{textAlign:'center',fontWeight:'900',color:'#06220e'},
  secondary:{backgroundColor:'#14333c',borderColor:'#2a4c55',borderWidth:1,borderRadius:13,padding:14,marginTop:8},
- row:{flexDirection:'row',gap:10,marginBottom:10},secondaryHalf:{flex:1,backgroundColor:'#14333c',borderColor:'#2a4c55',borderWidth:1,borderRadius:13,padding:14}
+ row:{flexDirection:'row',gap:10,marginBottom:10},secondaryHalf:{flex:1,backgroundColor:'#14333c',borderColor:'#2a4c55',borderWidth:1,borderRadius:13,padding:14},
+ disabled:{opacity:.55},stopBox:{backgroundColor:'#4a2020',borderColor:'#ff7a7a',borderWidth:1,borderRadius:14,padding:14,marginTop:12},stopTitle:{color:'#ffc7c7',fontWeight:'900',fontSize:16,marginBottom:6}
 });

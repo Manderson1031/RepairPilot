@@ -2,13 +2,26 @@
   "expo": {
     "name": "RepairPilot",
     "slug": "repairpilot",
-    "version": "0.13.0",
+    "version": "0.15.0",
     "scheme": "repairpilot",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "plugins": [
       "expo-router",
-      "expo-secure-store"
+      [
+        "expo-secure-store",
+        {
+          "configureAndroidBackup": true
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Allow RepairPilot to use the camera to photograph equipment and parts for diagnosis.",
+          "photosPermission": "Allow RepairPilot to access selected equipment photos for diagnosis.",
+          "microphonePermission": false
+        }
+      ]
     ],
     "ios": {
       "supportsTablet": true,
@@ -16,14 +29,14 @@
         "usesNonExemptEncryption": false
       },
       "bundleIdentifier": "com.repairpilot.app",
-      "buildNumber": "13"
+      "buildNumber": "15"
     },
     "android": {
       "package": "com.repairpilot.app",
-      "versionCode": 13,
-      "permissions": [
-        "CAMERA"
-      ]
+      "versionCode": 15
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
     }
   }
 }

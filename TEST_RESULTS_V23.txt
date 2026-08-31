@@ -1,0 +1,21 @@
+RepairPilot V23 validation
+==========================
+
+Mobile TSX transpile/syntax:
+PASS mobile/app/index.tsx
+PASS mobile/app/_layout.tsx
+
+Backend Python compileall:
+PASS
+
+Backend dependency-independent tests:
+16 passed in 0.55s
+
+Full backend test collection:
+Not run in this container because slowapi is not installed locally.
+Prior V22 packaged result: 27 passed.
+
+Preflight:
+16 passed
+1 warning (privacy/beta terms owner/counsel review)
+0 failures

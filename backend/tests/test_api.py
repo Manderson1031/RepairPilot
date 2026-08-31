@@ -96,3 +96,43 @@ def test_repair_rejects_invalid_outcome():
     eid=r.json()["id"]
     r=client.post("/repairs",headers={"Authorization":"Bearer "+token},json={"equipment_id":eid,"outcome":"maybe","fix":"x"})
     assert r.status_code==400
+
+
+def test_repair_rejects_foreign_diagnostic_session():
+    from app.authdb import save_diagnostic_session
+    u1=create_user(f"repair-session-a-{uuid.uuid4().hex}@test.local","password123","tester")
+    u2=create_user(f"repair-session-b-{uuid.uuid4().hex}@test.local","password123","tester")
+    sid=save_diagnostic_session(u1["id"],None,"surges",{}, {"status":"ask","risk":{"level":"green"}})
+    r=client.post("/equipment",headers={"Authorization":"Bearer "+token_for(u2)},json={"name":"Other mower","category":"Small engine"})
+    assert r.status_code==200
+    eid=r.json()["id"]
+    r=client.post("/repairs",headers={"Authorization":"Bearer "+token_for(u2)},json={"session_id":sid,"equipment_id":eid,"equipment_name":"Other mower","symptom":"surges","outcome":"fixed","fix":"test"})
+    assert r.status_code==404
+
+def test_diagnostic_to_repair_to_feedback_lifecycle(monkeypatch):
+    from app.models import DiagnoseResponse,NextStep,Risk,Hypothesis
+    user=create_user(f"lifecycle-{uuid.uuid4().hex}@test.local","password123","tester")
+    token=token_for(user)
+    headers={"Authorization":"Bearer "+token}
+    r=client.post("/equipment",headers=headers,json={"name":"Lifecycle mower","category":"Small engine"})
+    assert r.status_code==200
+    eid=r.json()["id"]
+    with conn() as c:
+        c.execute("UPDATE equipment_v2 SET serial=NULL, manufacturer=NULL, model=NULL, notes=NULL WHERE id=?",(eid,))
+    def fake_diagnose(req,manual):
+        return DiagnoseResponse(status="ask",next_step=NextStep(question="Is the filter clean?",answer_type="choice",choices=["Yes","No"],unit=None),risk=Risk(level="green",reason="Visual inspection."),evidence=[],working_hypotheses=[Hypothesis(cause="Air restriction",confidence=.4)],notes_for_record="test")
+    monkeypatch.setattr("app.main.run_diagnose",fake_diagnose)
+    body={"equipment_profile":{"id":eid,"name":"Lifecycle mower"},"symptom":"surges","history":[],"visual_evidence":[]}
+    r=client.post("/diagnose",headers=headers,json=body)
+    assert r.status_code==200
+    sid=r.json()["session_id"]
+    assert sid
+    r=client.post("/repairs",headers=headers,json={"session_id":sid,"equipment_id":eid,"equipment_name":"Lifecycle mower","symptom":"surges","history":[],"outcome":"fixed","fix":"Cleaned linkage"})
+    assert r.status_code==200
+    r=client.post("/feedback",headers=headers,json={"session_id":sid,"rating":5,"success":True,"comment":"fixed"})
+    assert r.status_code==200
+    from app.authdb import export_user_data
+    data=export_user_data(user["id"])
+    session=next(x for x in data["diagnostic_sessions"] if x["id"]==sid)
+    assert session["outcome"]=="fixed"
+    assert any(x["session_id"]==sid and x["success"] in (1,True) for x in data["feedback"])

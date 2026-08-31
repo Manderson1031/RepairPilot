@@ -440,22 +440,30 @@ def user_email_by_id(user_id):
 
 def save_diagnostic_session(user_id,equipment_id,symptom,request_data,response_data,session_id=None):
     sid=session_id or str(uuid.uuid4()); now=int(time.time())
-    status=response_data.get("status","ask")
-    risk=(response_data.get("risk") or {}).get("level","green")
     with connect() as c:
         owner=c.execute("SELECT user_id FROM diagnostic_sessions WHERE id=?",(sid,)).fetchone()
         if owner and owner["user_id"]!=user_id:
             # Never let a client-supplied session id collide with another user's session.
             sid=str(uuid.uuid4())
+
+        # Persist the canonical session id inside both snapshots. This keeps exported/debugged
+        # session JSON self-consistent with the row id and the API response.
+        request_snapshot=dict(request_data or {})
+        request_snapshot["session_id"]=sid
+        response_snapshot=dict(response_data or {})
+        response_snapshot["session_id"]=sid
+        status=response_snapshot.get("status","ask")
+        risk=(response_snapshot.get("risk") or {}).get("level","green")
+
         existing=c.execute("SELECT id FROM diagnostic_sessions WHERE id=? AND user_id=?",(sid,user_id)).fetchone()
         if existing:
             c.execute("""UPDATE diagnostic_sessions SET equipment_id=?,symptom=?,status=?,risk_level=?,request_json=?,response_json=?,updated=?
                          WHERE id=? AND user_id=?""",
-                      (equipment_id,symptom,status,risk,json.dumps(request_data),json.dumps(response_data),now,sid,user_id))
+                      (equipment_id,symptom,status,risk,json.dumps(request_snapshot),json.dumps(response_snapshot),now,sid,user_id))
         else:
             c.execute("""INSERT INTO diagnostic_sessions(id,user_id,equipment_id,symptom,status,risk_level,request_json,response_json,outcome,created,updated)
                          VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
-                      (sid,user_id,equipment_id,symptom,status,risk,json.dumps(request_data),json.dumps(response_data),"",now,now))
+                      (sid,user_id,equipment_id,symptom,status,risk,json.dumps(request_snapshot),json.dumps(response_snapshot),"",now,now))
     return sid
 
 def mark_diagnostic_outcome(user_id,session_id,outcome):
