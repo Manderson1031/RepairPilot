@@ -113,7 +113,7 @@ def create_invite(created_by,max_uses=1):
 def consume_invite(code):
     with connect() as c:
         row=c.execute("SELECT * FROM invite_codes WHERE code=? AND active=1",(code.strip().upper(),)).fetchone()
-        print("DB DEBUG:",c.execute("SELECT current_database() db,current_user usr").fetchone(),c.execute("SELECT code,active,uses,max_uses FROM repairpilot.invite_codes").fetchall(),flush=True)
+        
         if not row or row["uses"]>=row["max_uses"]: return False
         uses=row["uses"]+1
         active=0 if uses>=row["max_uses"] else 1
