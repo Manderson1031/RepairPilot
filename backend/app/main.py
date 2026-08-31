@@ -26,7 +26,7 @@ if settings.sentry_dsn:
     sentry_sdk.init(dsn=settings.sentry_dsn,traces_sample_rate=0.05,environment=settings.env)
 run_migrations()
 limiter=Limiter(key_func=get_remote_address,default_limits=[settings.rate_limit])
-app=FastAPI(title="RepairPilot API",version="0.9.0")
+app=FastAPI(title="RepairPilot API",version="0.9.1")
 app.state.limiter=limiter
 app.add_exception_handler(RateLimitExceeded,_rate_limit_exceeded_handler)
 app.add_middleware(CORSMiddleware,allow_origins=settings.allowed_origins,allow_credentials=True,allow_methods=["GET","POST","PATCH"],allow_headers=["Authorization","Content-Type"])
@@ -55,7 +55,7 @@ def current_admin(credentials:HTTPAuthorizationCredentials|None=Depends(bearer_s
     return user_from_credentials(credentials,admin=True)
 
 @app.get("/health")
-def health(): return {"ok":True,"mode":"ai" if os.getenv("OPENAI_API_KEY") else "demo","version":"0.9.0","env":settings.env,"storage":settings.storage_backend,"database":backend_name()}
+def health(): return {"ok":True,"mode":"ai" if os.getenv("OPENAI_API_KEY") else "demo","version":"0.9.1","env":settings.env,"storage":settings.storage_backend,"database":backend_name()}
 
 @app.post("/auth/register")
 def register(payload:dict):
@@ -244,7 +244,7 @@ def diagnose(request:Request,req:DiagnoseRequest,credentials:HTTPAuthorizationCr
         if not stored: raise HTTPException(404,"Equipment not found.")
         # The database profile is authoritative; do not let a client spoof model details
         # while referencing an existing equipment id.
-        req.equipment_profile=EquipmentProfile(**stored)
+        req.equipment_profile=equipment_profile_from_record(stored)
     query=req.symptom+" "+" ".join(x.answer for x in req.history[-3:])
     manual=search_manual(u["sub"],req.equipment_profile.id,query) if req.equipment_profile.id else []
     resp=run_diagnose(req,manual)

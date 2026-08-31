@@ -1,0 +1,6 @@
+RepairPilot V19 hotfix verification
+
+- Regression/unit test file: 5 passed
+- Specific nullable EquipmentProfile regression: PASS
+- Full suite could not be collected in this execution environment because slowapi is not installed here. Production requirements still include slowapi and Render V18 is already running it successfully.
+- Root cause confirmed from production Render traceback: Pydantic ValidationError for EquipmentProfile.serial receiving None.

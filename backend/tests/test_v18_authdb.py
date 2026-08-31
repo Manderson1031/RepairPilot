@@ -66,3 +66,23 @@ def test_current_model_router_defaults():
     assert select_model(req,[])=="gpt-5.6-terra"
     req.equipment_profile.category="Electrical control"
     assert select_model(req,[])=="gpt-5.6-sol"
+
+
+def test_database_equipment_profile_normalizes_nullable_text_fields():
+    from app.models import equipment_profile_from_record
+    profile=equipment_profile_from_record({
+        "id":"eq-1",
+        "name":"Mower",
+        "manufacturer":None,
+        "model":None,
+        "serial":None,
+        "category":None,
+        "notes":None,
+    })
+    assert profile.id=="eq-1"
+    assert profile.name=="Mower"
+    assert profile.manufacturer==""
+    assert profile.model==""
+    assert profile.serial==""
+    assert profile.category==""
+    assert profile.notes==""

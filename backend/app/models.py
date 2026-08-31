@@ -15,6 +15,19 @@ class EquipmentProfile(BaseModel):
     category: str = ""
     notes: str = ""
 
+
+def equipment_profile_from_record(record: dict) -> EquipmentProfile:
+    """Build an EquipmentProfile from a database row, normalizing nullable text columns."""
+    return EquipmentProfile(
+        id=record.get("id"),
+        name=record.get("name") or "",
+        manufacturer=record.get("manufacturer") or "",
+        model=record.get("model") or "",
+        serial=record.get("serial") or "",
+        category=record.get("category") or "",
+        notes=record.get("notes") or "",
+    )
+
 class HistoryItem(BaseModel):
     question: str
     answer: str
