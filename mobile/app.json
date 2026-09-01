@@ -21,7 +21,8 @@
           "photosPermission": "Allow RepairPilot to access selected equipment photos for diagnosis.",
           "microphonePermission": false
         }
-      ]
+      ],
+      "expo-sharing"
     ],
     "ios": {
       "supportsTablet": true,
