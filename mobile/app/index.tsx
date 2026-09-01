@@ -153,7 +153,7 @@ export default function App(){
  const resumePaused=()=>{if(last?.status!=='paused')return;setLast({...last,status:'ask'});setTimeout(()=>diagnosisScroll.current?.scrollToEnd({animated:true}),100)};
  const evidenceLabel=(source:string)=>({user_measurement:'Your result',visual:'Observation',general:'Diagnostic context',manual:'Manual reference'} as any)[source]||'Evidence';
  const needsContextPhoto=()=>{const q=(last?.next_step?.question||'').toLowerCase();return /photo|label|spark plug|nameplate|identification|serial/.test(q)};
- const GearBackdrop=()=> <View pointerEvents="none" style={s.gearLayer}><Text style={[s.gear,{top:8,right:-18,fontSize:120}]}>⚙</Text><Text style={[s.gear,{top:210,left:-38,fontSize:150}]}>⚙</Text><Text style={[s.gear,{top:520,right:-42,fontSize:175}]}>⚙</Text><Text style={[s.gear,{top:840,left:-28,fontSize:115}]}>⚙</Text></View>;
+ const GearBackdrop=()=> <View pointerEvents="none" style={s.gearLayer}><View style={[s.glow,{width:280,height:280,top:-90,right:-100}]}/><View style={[s.glow,{width:220,height:220,top:410,left:-120,opacity:.28}]}/><View style={[s.glowGreen,{width:180,height:180,bottom:40,right:-95}]}/><Text style={[s.gear,{top:4,right:-28,fontSize:142}]}>⚙</Text><Text style={[s.gear,{top:235,left:-48,fontSize:168}]}>⚙</Text><Text style={[s.gear,{top:560,right:-52,fontSize:190}]}>⚙</Text><Text style={[s.gear,{top:900,left:-38,fontSize:132}]}>⚙</Text><View style={s.meshLine}/></View>;
 
  const completeRepair=async(outcome:'fixed'|'needs_work')=>runBusy('repair',async()=>{
    if(outcome==='fixed'&&!fix.trim())return Alert.alert('RepairPilot','Enter what fixed the problem before marking the repair fixed.');
@@ -195,7 +195,7 @@ export default function App(){
    }catch(e:any){Alert.alert('RepairPilot',e.message)}
  };
 
- if(screen==='onboarding')return <SafeAreaView style={s.safe}><ScrollView contentContainerStyle={s.wrap}>
+ if(screen==='onboarding')return <SafeAreaView style={s.safe}><GearBackdrop/><ScrollView contentContainerStyle={s.wrap}>
   <Text style={s.brand}>Repair<Text style={s.green}>Pilot</Text></Text><Text style={s.title}>Diagnose it. Test it. Fix it.</Text>
   <View style={s.card}><Text style={s.tileTitle}>1. Add the machine</Text><Text style={s.muted}>Save the manufacturer, model, serial, photos and manuals so RepairPilot can keep the repair tied to the right equipment.</Text></View>
   <View style={s.card}><Text style={s.tileTitle}>2. Test one thing at a time</Text><Text style={s.muted}>RepairPilot asks for observations and measurements, then uses the result to choose the next useful test.</Text></View>
@@ -203,16 +203,16 @@ export default function App(){
   <TouchableOpacity style={s.primary} onPress={async()=>{await AsyncStorage.setItem(ONBOARD_KEY,'1');setOnboarded(true);setScreen('auth')}}><Text style={s.primaryText}>I understand — continue</Text></TouchableOpacity>
  </ScrollView></SafeAreaView>;
 
- if(screen==='reset')return <SafeAreaView style={s.safe}><ScrollView contentContainerStyle={s.wrap}>
+ if(screen==='reset')return <SafeAreaView style={s.safe}><GearBackdrop/><ScrollView contentContainerStyle={s.wrap}>
   <Text style={s.brand}>Repair<Text style={s.green}>Pilot</Text></Text><Text style={s.title}>Reset password</Text>
   <TextInput style={s.input} placeholder="New password (8+ characters)" secureTextEntry placeholderTextColor="#70858b" value={newPassword} onChangeText={setNewPassword}/>
   <TouchableOpacity style={s.primary} onPress={confirmReset}><Text style={s.primaryText}>Change password</Text></TouchableOpacity>
   <TouchableOpacity style={s.secondary} onPress={()=>setScreen('auth')}><Text style={s.white}>Cancel</Text></TouchableOpacity>
  </ScrollView></SafeAreaView>;
 
- if(screen==='loading')return <SafeAreaView style={s.safe}><ActivityIndicator style={{marginTop:80}} size="large"/></SafeAreaView>;
+ if(screen==='loading')return <SafeAreaView style={s.safe}><GearBackdrop/><ActivityIndicator style={{marginTop:80}} size="large"/></SafeAreaView>;
 
- if(!token || screen==='auth')return <SafeAreaView style={s.safe}><StatusBar style="light"/><ScrollView contentContainerStyle={s.wrap}>
+ if(!token || screen==='auth')return <SafeAreaView style={s.safe}><StatusBar style="light"/><GearBackdrop/><ScrollView contentContainerStyle={s.wrap}>
   <Text style={s.brand}>Repair<Text style={s.green}>Pilot</Text></Text><Text style={s.title}>Private Beta</Text>
   <View style={s.card}><Text style={s.tileTitle}>Before you start</Text><Text style={s.muted}>RepairPilot is a diagnostic assistant, not a substitute for qualified service on hazardous equipment. Stop when the app marks a step Red. Equipment profiles, uploaded manuals, photos and repair history are stored with your account.</Text></View>
   <TextInput style={s.input} placeholder="Email" placeholderTextColor="#70858b" autoCapitalize="none" value={email} onChangeText={setEmail}/>
@@ -223,7 +223,7 @@ export default function App(){
   <TouchableOpacity style={s.secondary} onPress={requestReset}><Text style={s.white}>Forgot password</Text></TouchableOpacity>
  </ScrollView></SafeAreaView>;
 
- if(screen==='home')return <SafeAreaView style={s.safe}><ScrollView contentContainerStyle={s.wrap}>
+ if(screen==='home')return <SafeAreaView style={s.safe}><GearBackdrop/><ScrollView contentContainerStyle={s.wrap}>
   <Text style={s.brand}>Repair<Text style={s.green}>Pilot</Text></Text>
   <View style={s.grid}>
    <TouchableOpacity style={s.tile} onPress={async()=>{await loadEquipment();setScreen('equipment')}}><Text style={s.tileTitle}>My Equipment</Text><Text style={s.muted}>Profiles, photos & manuals</Text></TouchableOpacity>
@@ -235,7 +235,7 @@ export default function App(){
   <TouchableOpacity style={s.secondary} onPress={logout}><Text style={s.white}>Log out</Text></TouchableOpacity>
  </ScrollView></SafeAreaView>;
 
- if(screen==='settings')return <SafeAreaView style={s.safe}><ScrollView contentContainerStyle={s.wrap}>
+ if(screen==='settings')return <SafeAreaView style={s.safe}><GearBackdrop/><ScrollView contentContainerStyle={s.wrap}>
   <Text style={s.title}>Account & Privacy</Text>
   <View style={s.card}><Text style={s.tileTitle}>Your RepairPilot data</Text><Text style={s.muted}>You can export your account records or permanently delete your RepairPilot account. Uploaded equipment information is tied to your account.</Text></View>
   <TouchableOpacity style={s.secondary} onPress={shareAccountExport}><Text style={s.white}>Export / share my data</Text></TouchableOpacity>
@@ -248,7 +248,7 @@ export default function App(){
   <TouchableOpacity style={s.secondary} onPress={()=>setScreen('home')}><Text style={s.white}>Back</Text></TouchableOpacity>
  </ScrollView></SafeAreaView>;
 
- if(screen==='equipment')return <SafeAreaView style={s.safe}><ScrollView contentContainerStyle={s.wrap}>
+ if(screen==='equipment')return <SafeAreaView style={s.safe}><GearBackdrop/><ScrollView contentContainerStyle={s.wrap}>
   <Text style={s.title}>My Equipment</Text>
   <TextInput style={s.input} placeholder="Equipment name" placeholderTextColor="#70858b" value={newName} onChangeText={setNewName}/>
   <TextInput style={s.input} placeholder="Manufacturer (recommended)" placeholderTextColor="#70858b" value={newManufacturer} onChangeText={setNewManufacturer}/>
@@ -260,19 +260,19 @@ export default function App(){
   <TouchableOpacity style={s.secondary} onPress={()=>setScreen('home')}><Text style={s.white}>Back</Text></TouchableOpacity>
  </ScrollView></SafeAreaView>;
 
- if(screen==='history')return <SafeAreaView style={s.safe}><ScrollView contentContainerStyle={s.wrap}>
+ if(screen==='history')return <SafeAreaView style={s.safe}><GearBackdrop/><ScrollView contentContainerStyle={s.wrap}>
   <Text style={s.title}>Repair History</Text>
   {repairs.length===0?<Text style={s.muted}>No saved repairs yet.</Text>:repairs.map(r=><View key={r.id} style={s.card}><Text style={s.tileTitle}>{r.equipment_name}</Text><Text style={s.white}>{r.fix||'Unresolved'}</Text><Text style={s.muted}>{r.symptom}</Text><TouchableOpacity style={s.secondary} onPress={()=>shareReport(r)}><Text style={s.white}>Share PDF report</Text></TouchableOpacity></View>)}
   <TouchableOpacity style={s.secondary} onPress={()=>setScreen('home')}><Text style={s.white}>Back</Text></TouchableOpacity>
  </ScrollView></SafeAreaView>;
 
- if(screen==='reviews')return <SafeAreaView style={s.safe}><ScrollView contentContainerStyle={s.wrap}>
+ if(screen==='reviews')return <SafeAreaView style={s.safe}><GearBackdrop/><ScrollView contentContainerStyle={s.wrap}>
   <Text style={s.title}>Review Queue</Text>
   {reviews.length===0?<Text style={s.muted}>No escalated cases.</Text>:reviews.map(r=><View key={r.id} style={s.card}><Text style={s.tileTitle}>{r.risk_level.toUpperCase()} case</Text><Text style={s.muted}>{r.status}</Text></View>)}
   <TouchableOpacity style={s.secondary} onPress={()=>setScreen('home')}><Text style={s.white}>Back</Text></TouchableOpacity>
  </ScrollView></SafeAreaView>;
 
- if(screen==='complete')return <SafeAreaView style={s.safe}><ScrollView contentContainerStyle={s.wrap}>
+ if(screen==='complete')return <SafeAreaView style={s.safe}><GearBackdrop/><ScrollView contentContainerStyle={s.wrap}>
   <Text style={s.title}>Repair Complete</Text>
   <TextInput style={s.input} placeholder="What fixed it?" placeholderTextColor="#70858b" value={fix} onChangeText={setFix}/>
   <TextInput style={s.input} placeholder="Part used (optional)" placeholderTextColor="#70858b" value={part} onChangeText={setPart}/>
@@ -313,15 +313,15 @@ export default function App(){
 }
 
 const s=StyleSheet.create({
- safe:{flex:1,backgroundColor:'#04131b'},wrap:{padding:20,paddingBottom:60},brand:{fontSize:34,fontWeight:'900',color:'#fff',marginBottom:22},green:{color:'#39e267'},
- gearLayer:{...StyleSheet.absoluteFillObject,overflow:'hidden'},gear:{position:'absolute',color:'rgba(32,122,170,0.12)',fontWeight:'400'},
- title:{fontSize:28,fontWeight:'800',color:'#fff',marginBottom:15},muted:{color:'#9eb3aa',lineHeight:20},white:{color:'#fff',fontSize:16},link:{color:'#8ef5a6',marginTop:8},
- grid:{flexDirection:'row',flexWrap:'wrap',gap:10},tile:{width:'48%',backgroundColor:'#12313a',borderColor:'#28515d',borderWidth:1,borderRadius:16,padding:16,minHeight:110},
- tileTitle:{color:'#fff',fontWeight:'800',fontSize:18,marginBottom:5},card:{backgroundColor:'rgba(7,35,50,0.94)',borderColor:'#178bc1',borderWidth:1,borderRadius:18,padding:17,marginTop:13},
- evidence:{backgroundColor:'rgba(7,31,48,0.95)',borderColor:'#236b8d',borderWidth:1,borderRadius:12,padding:12,marginTop:10},
- input:{backgroundColor:'rgba(7,30,45,0.96)',borderColor:'#2c7fa8',borderWidth:1,borderRadius:13,padding:14,color:'#fff',fontSize:16,marginBottom:10},
- primary:{backgroundColor:'#35d65d',borderRadius:13,padding:15,marginTop:8},primaryText:{textAlign:'center',fontWeight:'900',color:'#06220e'},
- secondary:{backgroundColor:'rgba(11,43,65,0.96)',borderColor:'#2c79a3',borderWidth:1,borderRadius:13,padding:14,marginTop:8},
- row:{flexDirection:'row',gap:10,marginBottom:10},secondaryHalf:{flex:1,backgroundColor:'rgba(11,43,65,0.96)',borderColor:'#2c79a3',borderWidth:1,borderRadius:13,padding:14},
- cardHeader:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',gap:8,marginBottom:8},riskPill:{borderRadius:999,paddingHorizontal:10,paddingVertical:5},riskGreen:{backgroundColor:'#0a6128'},riskYellow:{backgroundColor:'#725c0a'},riskRed:{backgroundColor:'#7a2424'},riskText:{color:'#fff',fontWeight:'800',fontSize:12},evidenceTitle:{color:'#52bfff',fontWeight:'800',fontSize:14,marginBottom:4},contextAction:{flex:1,backgroundColor:'#0c3b58',borderColor:'#1db4e9',borderWidth:1,borderRadius:13,padding:12,marginTop:10},contextText:{color:'#bfefff',fontWeight:'800',textAlign:'center'},thinking:{flexDirection:'row',gap:12,alignItems:'center',backgroundColor:'#092f48',borderColor:'#1db4e9',borderWidth:1,borderRadius:14,padding:14,marginTop:12},thinkingTitle:{color:'#fff',fontWeight:'800',marginBottom:3},pauseBox:{backgroundColor:'#123345',borderColor:'#46b9e8',borderWidth:1,borderRadius:14,padding:14,marginTop:12},pauseTitle:{color:'#7fd8ff',fontWeight:'900',fontSize:17,marginBottom:6},outcomeButton:{backgroundColor:'#0d3045',borderColor:'#2b7698',borderWidth:1,borderRadius:13,padding:14,marginTop:12},outcomeText:{color:'#d9edf6',textAlign:'center',fontWeight:'800'},disabled:{opacity:.55},stopBox:{backgroundColor:'#4a2020',borderColor:'#ff7a7a',borderWidth:1,borderRadius:14,padding:14,marginTop:12},stopTitle:{color:'#ffc7c7',fontWeight:'900',fontSize:16,marginBottom:6}
+ safe:{flex:1,backgroundColor:'#031018'},wrap:{padding:20,paddingBottom:64},brand:{fontSize:36,fontWeight:'900',color:'#f5fbff',marginBottom:22,textShadowColor:'rgba(42,190,255,.38)',textShadowRadius:12},green:{color:'#56f07b'},
+ gearLayer:{...StyleSheet.absoluteFillObject,overflow:'hidden',backgroundColor:'#031018'},gear:{position:'absolute',color:'rgba(40,166,224,0.105)',fontWeight:'400',textShadowColor:'rgba(20,145,210,.2)',textShadowRadius:14},glow:{position:'absolute',borderRadius:999,backgroundColor:'rgba(22,135,205,.22)'},glowGreen:{position:'absolute',borderRadius:999,backgroundColor:'rgba(66,225,108,.10)'},meshLine:{position:'absolute',left:20,right:20,top:92,height:1,backgroundColor:'rgba(78,195,242,.10)'},
+ title:{fontSize:28,fontWeight:'900',color:'#f5fbff',marginBottom:15,textShadowColor:'rgba(40,174,232,.25)',textShadowRadius:8},muted:{color:'#a9c2cb',lineHeight:20},white:{color:'#f6fbff',fontSize:16},link:{color:'#8df7a5',marginTop:8,fontWeight:'700'},
+ grid:{flexDirection:'row',flexWrap:'wrap',gap:11},tile:{width:'48%',backgroundColor:'rgba(8,43,62,.93)',borderColor:'rgba(50,170,220,.55)',borderWidth:1,borderRadius:18,padding:17,minHeight:112,shadowColor:'#25aee8',shadowOpacity:.14,shadowRadius:12,shadowOffset:{width:0,height:5}},
+ tileTitle:{color:'#f7fcff',fontWeight:'900',fontSize:18,marginBottom:5},card:{backgroundColor:'rgba(6,34,49,.94)',borderColor:'rgba(42,173,226,.68)',borderWidth:1,borderRadius:19,padding:17,marginTop:13,shadowColor:'#1aa8e5',shadowOpacity:.12,shadowRadius:14,shadowOffset:{width:0,height:5}},
+ evidence:{backgroundColor:'rgba(6,29,44,.96)',borderColor:'rgba(46,139,180,.72)',borderWidth:1,borderRadius:13,padding:12,marginTop:10},
+ input:{backgroundColor:'rgba(5,27,41,.97)',borderColor:'rgba(52,158,204,.72)',borderWidth:1,borderRadius:14,padding:14,color:'#fff',fontSize:16,marginBottom:10},
+ primary:{backgroundColor:'#43df69',borderColor:'#76f291',borderWidth:1,borderRadius:14,padding:15,marginTop:8,shadowColor:'#43df69',shadowOpacity:.22,shadowRadius:10,shadowOffset:{width:0,height:4}},primaryText:{textAlign:'center',fontWeight:'900',color:'#041b0b'},
+ secondary:{backgroundColor:'rgba(9,48,72,.96)',borderColor:'rgba(48,154,204,.72)',borderWidth:1,borderRadius:14,padding:14,marginTop:8},
+ row:{flexDirection:'row',gap:10,marginBottom:10},secondaryHalf:{flex:1,backgroundColor:'rgba(9,48,72,.96)',borderColor:'rgba(48,154,204,.72)',borderWidth:1,borderRadius:14,padding:14},
+ cardHeader:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',gap:8,marginBottom:8},riskPill:{borderRadius:999,paddingHorizontal:10,paddingVertical:5},riskGreen:{backgroundColor:'#0a6d2c'},riskYellow:{backgroundColor:'#80680b'},riskRed:{backgroundColor:'#812929'},riskText:{color:'#fff',fontWeight:'900',fontSize:12},evidenceTitle:{color:'#62caff',fontWeight:'900',fontSize:14,marginBottom:4},contextAction:{flex:1,backgroundColor:'rgba(10,62,91,.97)',borderColor:'#31bce9',borderWidth:1,borderRadius:14,padding:12,marginTop:10},contextText:{color:'#d3f4ff',fontWeight:'900',textAlign:'center'},thinking:{flexDirection:'row',gap:12,alignItems:'center',backgroundColor:'rgba(8,51,76,.98)',borderColor:'#34bde9',borderWidth:1,borderRadius:15,padding:14,marginTop:12},thinkingTitle:{color:'#fff',fontWeight:'900',marginBottom:3},pauseBox:{backgroundColor:'rgba(13,53,72,.98)',borderColor:'#56c8ef',borderWidth:1,borderRadius:15,padding:14,marginTop:12},pauseTitle:{color:'#8ee3ff',fontWeight:'900',fontSize:17,marginBottom:6},outcomeButton:{backgroundColor:'rgba(8,43,62,.96)',borderColor:'rgba(53,142,180,.78)',borderWidth:1,borderRadius:14,padding:14,marginTop:12},outcomeText:{color:'#e1f4fb',textAlign:'center',fontWeight:'900'},disabled:{opacity:.55},stopBox:{backgroundColor:'rgba(79,27,27,.97)',borderColor:'#ff8585',borderWidth:1,borderRadius:15,padding:14,marginTop:12},stopTitle:{color:'#ffd0d0',fontWeight:'900',fontSize:16,marginBottom:6}
 });

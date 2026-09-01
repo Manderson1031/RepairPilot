@@ -2,7 +2,7 @@
   "expo": {
     "name": "RepairPilot",
     "slug": "repairpilot",
-    "version": "0.16.0",
+    "version": "0.17.0",
     "scheme": "repairpilot",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
@@ -29,11 +29,15 @@
         "usesNonExemptEncryption": false
       },
       "bundleIdentifier": "com.repairpilot.app",
-      "buildNumber": "16"
+      "buildNumber": "17"
     },
     "android": {
       "package": "com.repairpilot.app",
-      "versionCode": 16
+      "versionCode": 17,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/repairpilot-icon.png",
+        "backgroundColor": "#031018"
+      }
     },
     "runtimeVersion": {
       "policy": "appVersion"
@@ -44,6 +48,7 @@
         "projectId": "751be404-bdbb-43a9-986e-c586cd0ca02b"
       }
     },
-    "owner": "manderson1031"
+    "owner": "manderson1031",
+    "icon": "./assets/repairpilot-icon.png"
   }
 }
