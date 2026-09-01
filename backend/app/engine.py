@@ -16,6 +16,10 @@ Primary behavior:
 - Never bypass or defeat a safety/interlock/guard/E-stop.
 - If the next useful step is high-risk, return status=escalate.
 - Cite manual evidence as 'Manual name, page N' when provided.
+- Do not repeat a test already answered unless verification is specifically necessary; explain why if verification is necessary.
+- Prefer concise choice answers for inspections. For hands-on inspection/measurement questions, include an "Unable to inspect right now" choice when practical.
+- Treat "unable to inspect", "cannot check", "not at the machine", and equivalent answers as unavailable access, not as a completed negative finding.
+- When equipment access is unavailable, use already-known evidence first instead of cycling through more physical checks.
 """
 
 
@@ -39,7 +43,7 @@ SCHEMA={
 "type":"object","additionalProperties":False,
 "required":["status","next_step","risk","evidence","working_hypotheses","notes_for_record"],
 "properties":{
-"status":{"type":"string","enum":["ask","complete","escalate"]},
+"status":{"type":"string","enum":["ask","complete","escalate","paused"]},
 "next_step":{"anyOf":[{"type":"null"},{"type":"object","additionalProperties":False,
 "required":["question","answer_type","choices","unit"],
 "properties":{"question":{"type":"string"},"answer_type":{"type":"string","enum":["choice","measurement","text"]},"choices":{"type":"array","items":{"type":"string"}},"unit":{"anyOf":[{"type":"string"},{"type":"null"}]}}}]},
@@ -50,6 +54,25 @@ SCHEMA={
 "working_hypotheses":{"type":"array","items":{"type":"object","additionalProperties":False,"required":["cause","confidence"],"properties":{"cause":{"type":"string"},"confidence":{"type":"number","minimum":0,"maximum":1}}}},
 "notes_for_record":{"type":"string"}
 }}
+
+UNAVAILABLE_PHRASES=("unable to inspect","unable to check","cannot inspect","can't inspect","cannot check","can't check","not at the machine","not at the mower","away from the machine","away from the mower","not available right now")
+
+def is_unavailable_answer(answer:str)->bool:
+    a=(answer or "").strip().lower()
+    return any(p in a for p in UNAVAILABLE_PHRASES)
+
+def pause_for_unavailable_access(req:DiagnoseRequest):
+    """Pause after two consecutive unavailable physical checks instead of generating more hands-on tests."""
+    if len(req.history)<2 or not all(is_unavailable_answer(x.answer) for x in req.history[-2:]):
+        return None
+    pending=req.history[-1]
+    return DiagnoseResponse(
+        status="paused",
+        next_step=NextStep(question=pending.question,answer_type="text",choices=[],unit=None),
+        risk=Risk(level="green",reason="Diagnosis is paused until the equipment is available."),
+        evidence=[],working_hypotheses=[],
+        notes_for_record="Diagnosis paused — equipment access needed. Resume at the last unavailable check when you are back at the machine."
+    )
 
 def demo(req:DiagnoseRequest,manual:list[dict])->DiagnoseResponse:
     n=len(req.history); cat=req.equipment_profile.category.lower(); symptom=req.symptom.lower()
@@ -76,8 +99,8 @@ def demo(req:DiagnoseRequest,manual:list[dict])->DiagnoseResponse:
     else:
         steps=[
           ("Does partially applying the choke change the surging?","choice",["Surging improves","No change","Gets worse"],None,"green"),
-          ("With the engine off, inspect the governor spring and throttle/carburetor linkage. Anything disconnected, binding, stretched, or loose?","choice",["Looks normal","Found a problem","Not sure"],None,"green"),
-          ("When running safely outdoors, does the governor/throttle linkage visibly move back and forth with the RPM?","choice",["Yes","No","Can't tell"],None,"yellow")]
+          ("With the engine off, inspect the governor spring and throttle/carburetor linkage. Anything disconnected, binding, stretched, or loose?","choice",["Looks normal","Found a problem","Not sure","Unable to inspect right now"],None,"green"),
+          ("When running safely outdoors, does the governor/throttle linkage visibly move back and forth with the RPM?","choice",["Yes","No","Can't tell","Unable to inspect right now"],None,"yellow")]
         hypo=[Hypothesis(cause="Lean fuel mixture / restricted idle-off-idle circuit",confidence=.5),Hypothesis(cause="Governor/linkage hunting",confidence=.3)]
     if n>=len(steps):
         return enforce(DiagnoseResponse(status="complete",next_step=None,risk=Risk(level="green",reason="Available demo path complete."),evidence=evidence,working_hypotheses=hypo,notes_for_record="Demo path complete."))
@@ -85,6 +108,8 @@ def demo(req:DiagnoseRequest,manual:list[dict])->DiagnoseResponse:
     return enforce(DiagnoseResponse(status="ask",next_step=NextStep(question=q,answer_type=t,choices=ch,unit=u),risk=Risk(level=r,reason="Risk classified before presentation.",requires_qualified_technician=(r=="red")),evidence=evidence,working_hypotheses=hypo,notes_for_record="Demo mode."))
 
 def diagnose(req:DiagnoseRequest,manual:list[dict])->DiagnoseResponse:
+    paused=pause_for_unavailable_access(req)
+    if paused: return paused
     if not os.getenv("OPENAI_API_KEY"): return demo(req,manual)
     from openai import OpenAI
     client=OpenAI(api_key=os.getenv("OPENAI_API_KEY"))

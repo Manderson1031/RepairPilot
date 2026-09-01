@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 RiskLevel = Literal["green","yellow","red"]
 AnswerType = Literal["choice","measurement","text"]
-StatusType = Literal["ask","complete","escalate"]
+StatusType = Literal["ask","complete","escalate","paused"]
 
 class EquipmentProfile(BaseModel):
     id: Optional[str] = None

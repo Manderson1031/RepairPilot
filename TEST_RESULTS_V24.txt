@@ -1,0 +1,7 @@
+RepairPilot V24 validation
+
+PASS: Python compileall backend/app
+PASS: 12 targeted backend tests (demo engine, safety, repository, sessions)
+PASS: New unavailable-access pause regression tests
+BLOCKED IN ISOLATED BUILD CONTAINER: full backend suite requires SlowAPI dependency
+BLOCKED IN ISOLATED BUILD CONTAINER: full Expo TypeScript dependency install timed out; run npm ci + npm run check in Codespaces before EAS build

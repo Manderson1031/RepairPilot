@@ -2,7 +2,7 @@
   "expo": {
     "name": "RepairPilot",
     "slug": "repairpilot",
-    "version": "0.15.0",
+    "version": "0.16.0",
     "scheme": "repairpilot",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
@@ -29,11 +29,11 @@
         "usesNonExemptEncryption": false
       },
       "bundleIdentifier": "com.repairpilot.app",
-      "buildNumber": "15"
+      "buildNumber": "16"
     },
     "android": {
       "package": "com.repairpilot.app",
-      "versionCode": 15
+      "versionCode": 16
     },
     "runtimeVersion": {
       "policy": "appVersion"

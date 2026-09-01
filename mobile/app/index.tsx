@@ -1,5 +1,5 @@
-import React,{useEffect,useState} from 'react';
-import {SafeAreaView,ScrollView,StyleSheet,Text,TextInput,TouchableOpacity,View,Alert,ActivityIndicator} from 'react-native';
+import React,{useEffect,useRef,useState} from 'react';
+import {SafeAreaView,ScrollView,StyleSheet,Text,TextInput,TouchableOpacity,View,Alert,ActivityIndicator,KeyboardAvoidingView,Platform,Keyboard} from 'react-native';
 import {StatusBar} from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -32,6 +32,7 @@ export default function App(){
  const [answerInput,setAnswerInput]=useState('');
  const [repairs,setRepairs]=useState<any[]>([]),[reviews,setReviews]=useState<any[]>([]);
  const [fix,setFix]=useState(''),[part,setPart]=useState(''),[notes,setNotes]=useState('');
+ const diagnosisScroll=useRef<ScrollView>(null);
 
  const authHeaders=()=>({Authorization:`Bearer ${token}`});
  const jsonHeaders=()=>({'Content-Type':'application/json',Authorization:`Bearer ${token}`});
@@ -139,10 +140,20 @@ export default function App(){
    if(!symptom.trim())return Alert.alert('RepairPilot','Describe the symptom before starting diagnosis.');
    const body={session_id:last?.session_id||null,equipment_profile:{id:selected.id,name:selected.name,manufacturer:selected.manufacturer||'',model:selected.model||'',serial:selected.serial||'',category:selected.category||'',notes:selected.notes||''},symptom:symptom.trim(),history:h,visual_evidence:visual?[visual]:[]};
    try{const r=await signedFetch('/diagnose',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json();
-   if(r.ok){setLast(j);setAnswerInput('')}else Alert.alert('RepairPilot',j.detail||'Diagnosis error')}catch(e:any){Alert.alert('RepairPilot',e.message)}
+   if(r.ok){setLast(j)}else Alert.alert('RepairPilot',j.detail||'Diagnosis error')}catch(e:any){Alert.alert('RepairPilot',e.message)}
  });
- const answer=(a:string)=>{if(!last?.next_step)return;const h=[...history,{question:last.next_step.question,answer:a,risk:last.risk.level}];setHistory(h);setAnswerInput('');next(h)};
+ const answer=async(a:string)=>{
+   if(!last?.next_step||busy)return;
+   const h=[...history,{question:last.next_step.question,answer:a,risk:last.risk.level}];
+   const previous=answerInput;setHistory(h);
+   await next(h);
+   setAnswerInput('');Keyboard.dismiss();
+ };
  const submitTypedAnswer=()=>{const a=answerInput.trim();if(a)answer(a)};
+ const resumePaused=()=>{if(last?.status!=='paused')return;setLast({...last,status:'ask'});setTimeout(()=>diagnosisScroll.current?.scrollToEnd({animated:true}),100)};
+ const evidenceLabel=(source:string)=>({user_measurement:'Your result',visual:'Observation',general:'Diagnostic context',manual:'Manual reference'} as any)[source]||'Evidence';
+ const needsContextPhoto=()=>{const q=(last?.next_step?.question||'').toLowerCase();return /photo|label|spark plug|nameplate|identification|serial/.test(q)};
+ const GearBackdrop=()=> <View pointerEvents="none" style={s.gearLayer}><Text style={[s.gear,{top:8,right:-18,fontSize:120}]}>⚙</Text><Text style={[s.gear,{top:210,left:-38,fontSize:150}]}>⚙</Text><Text style={[s.gear,{top:520,right:-42,fontSize:175}]}>⚙</Text><Text style={[s.gear,{top:840,left:-28,fontSize:115}]}>⚙</Text></View>;
 
  const completeRepair=async(outcome:'fixed'|'needs_work')=>runBusy('repair',async()=>{
    if(outcome==='fixed'&&!fix.trim())return Alert.alert('RepairPilot','Enter what fixed the problem before marking the repair fixed.');
@@ -271,7 +282,8 @@ export default function App(){
   <TouchableOpacity style={s.secondary} onPress={()=>setScreen('diagnose')}><Text style={s.white}>Back</Text></TouchableOpacity>
  </ScrollView></SafeAreaView>;
 
- return <SafeAreaView style={s.safe}><ScrollView contentContainerStyle={s.wrap}>
+ return <SafeAreaView style={s.safe}><GearBackdrop/><KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':undefined} keyboardVerticalOffset={8}>
+  <ScrollView ref={diagnosisScroll} keyboardShouldPersistTaps="handled" contentContainerStyle={s.wrap}>
   <Text style={s.title}>{selected?.name}</Text>
   <View style={s.row}>
    <TouchableOpacity style={[s.secondaryHalf,busy? s.disabled:null]} disabled={!!busy} onPress={takePhoto}><Text style={s.white}>{busy==='photo'?'Analyzing…':'Take Photo'}</Text></TouchableOpacity>
@@ -280,32 +292,36 @@ export default function App(){
   <TouchableOpacity style={[s.secondary,busy? s.disabled:null]} disabled={!!busy} onPress={uploadManual}><Text style={s.white}>{busy==='manual'?'Uploading…':'Add Manual PDF'}</Text></TouchableOpacity>
   {visual&&<View style={s.evidence}><Text style={s.white}>{visual.description}</Text><Text style={s.muted}>Vision confidence: {Math.round((visual.confidence||0)*100)}%</Text></View>}
   {!last?<>
-   <TextInput style={[s.input,{minHeight:110}]} multiline placeholder="Describe exactly what the machine is doing" placeholderTextColor="#70858b" value={symptom} onChangeText={setSymptom}/>
-   <TouchableOpacity style={[s.primary,busy? s.disabled:null]} disabled={!!busy} onPress={()=>next()}><Text style={s.primaryText}>{busy==='diagnose'?'Thinking…':'Start diagnosis'}</Text></TouchableOpacity>
+   <TextInput style={[s.input,{minHeight:110}]} multiline placeholder="Describe exactly what the machine is doing" placeholderTextColor="#6f8a96" value={symptom} onChangeText={setSymptom}/>
+   <TouchableOpacity style={[s.primary,busy? s.disabled:null]} disabled={!!busy} onPress={()=>next()}><Text style={s.primaryText}>Start diagnosis</Text></TouchableOpacity>
   </>:<>
-   <View style={s.card}><Text style={s.tileTitle}>RepairPilot</Text><Text style={s.white}>{last.next_step?.question||last.notes_for_record}</Text><Text style={s.muted}>Risk: {last.risk?.level?.toUpperCase()}</Text></View>
-   {last.evidence?.map((e:any,i:number)=><View key={i} style={s.evidence}><Text style={s.white}>{e.source}{e.citation?` — ${e.citation}`:''}</Text><Text style={s.muted}>{e.detail||''}</Text></View>)}
+   <View style={s.card}><View style={s.cardHeader}><Text style={s.tileTitle}>⚙ RepairPilot</Text><View style={[s.riskPill,last.risk?.level==='green'?s.riskGreen:last.risk?.level==='yellow'?s.riskYellow:s.riskRed]}><Text style={s.riskText}>Risk: {last.risk?.level?.toUpperCase()}</Text></View></View><Text style={s.white}>{last.next_step?.question||last.notes_for_record}</Text></View>
+   {last.evidence?.map((e:any,i:number)=><View key={i} style={s.evidence}><Text style={s.evidenceTitle}>{evidenceLabel(e.source)}{e.citation?` — ${e.citation}`:''}</Text><Text style={s.muted}>{e.detail||''}</Text></View>)}
+   {needsContextPhoto()&&last.status==='ask'?<View style={s.row}><TouchableOpacity style={s.contextAction} disabled={!!busy} onPress={takePhoto}><Text style={s.contextText}>📷 Take requested photo</Text></TouchableOpacity><TouchableOpacity style={s.contextAction} disabled={!!busy} onPress={choosePhoto}><Text style={s.contextText}>Choose photo</Text></TouchableOpacity></View>:null}
+   {last.status==='paused'?<View style={s.pauseBox}><Text style={s.pauseTitle}>Diagnosis paused</Text><Text style={s.white}>{last.notes_for_record}</Text><TouchableOpacity style={s.secondary} onPress={resumePaused}><Text style={s.white}>I'm back at the equipment — resume here</Text></TouchableOpacity></View>:null}
    {last.status==='ask'&&last.risk?.level!=='red'&&last.next_step?.choices?.map((c:string)=><TouchableOpacity key={c} disabled={!!busy} style={[s.secondary,busy? s.disabled:null]} onPress={()=>answer(c)}><Text style={s.white}>{c}</Text></TouchableOpacity>)}
    {last.status==='ask'&&last.risk?.level!=='red'&&last.next_step && last.next_step.choices?.length===0 ? <>
-    <TextInput style={s.input} placeholder={last.next_step.answer_type==='measurement'?`Enter measurement${last.next_step.unit?` (${last.next_step.unit})`:''}`:'Enter your answer'} placeholderTextColor="#70858b" value={answerInput} onChangeText={setAnswerInput} keyboardType={last.next_step.answer_type==='measurement'?'decimal-pad':'default'} onSubmitEditing={submitTypedAnswer}/>
-    <TouchableOpacity style={[s.secondary,busy? s.disabled:null]} disabled={!!busy} onPress={submitTypedAnswer}><Text style={s.white}>{busy==='diagnose'?'Thinking…':`Submit answer${last.next_step.unit?` (${last.next_step.unit})`:''}`}</Text></TouchableOpacity>
+    <TextInput style={s.input} placeholder={last.next_step.answer_type==='measurement'?`Enter measurement${last.next_step.unit?` (${last.next_step.unit})`:''}`:'Enter your answer'} placeholderTextColor="#6f8a96" value={answerInput} onChangeText={setAnswerInput} keyboardType={last.next_step.answer_type==='measurement'?'decimal-pad':'default'} returnKeyType="done" blurOnSubmit={true} onFocus={()=>setTimeout(()=>diagnosisScroll.current?.scrollToEnd({animated:true}),250)} onSubmitEditing={()=>Keyboard.dismiss()}/>
+    <TouchableOpacity style={[s.secondary,busy? s.disabled:null]} disabled={!!busy} onPress={submitTypedAnswer}><Text style={s.white}>{`Submit answer${last.next_step.unit?` (${last.next_step.unit})`:''}`}</Text></TouchableOpacity>
    </>:null}
    {last.status==='escalate'||last.risk?.level==='red'?<View style={s.stopBox}><Text style={s.stopTitle}>STOP / ESCALATE</Text><Text style={s.white}>{last.risk?.reason||'This step requires a qualified technician.'}</Text></View>:null}
-   <TouchableOpacity style={s.primary} onPress={()=>setScreen('complete')}><Text style={s.primaryText}>{last.status==='complete'?'Save repair outcome':'Repair complete / save outcome'}</Text></TouchableOpacity>
+   {busy==='diagnose'?<View style={s.thinking}><ActivityIndicator size="small"/><View style={{flex:1}}><Text style={s.thinkingTitle}>RepairPilot is analyzing your results…</Text><Text style={s.muted}>Your previous diagnostic information will stay here while the next step is prepared.</Text></View></View>:null}
+   <TouchableOpacity style={s.outcomeButton} onPress={()=>setScreen('complete')}><Text style={s.outcomeText}>{last.status==='complete'?'Repair complete — save outcome':'End diagnosis / save outcome'}</Text></TouchableOpacity>
   </>}
   <TouchableOpacity style={s.secondary} onPress={()=>setScreen('equipment')}><Text style={s.white}>Back</Text></TouchableOpacity>
- </ScrollView></SafeAreaView>
+ </ScrollView></KeyboardAvoidingView></SafeAreaView>
 }
 
 const s=StyleSheet.create({
- safe:{flex:1,backgroundColor:'#07161b'},wrap:{padding:20,paddingBottom:60},brand:{fontSize:34,fontWeight:'900',color:'#fff',marginBottom:22},green:{color:'#36c45b'},
+ safe:{flex:1,backgroundColor:'#04131b'},wrap:{padding:20,paddingBottom:60},brand:{fontSize:34,fontWeight:'900',color:'#fff',marginBottom:22},green:{color:'#39e267'},
+ gearLayer:{...StyleSheet.absoluteFillObject,overflow:'hidden'},gear:{position:'absolute',color:'rgba(32,122,170,0.12)',fontWeight:'400'},
  title:{fontSize:28,fontWeight:'800',color:'#fff',marginBottom:15},muted:{color:'#9eb3aa',lineHeight:20},white:{color:'#fff',fontSize:16},link:{color:'#8ef5a6',marginTop:8},
  grid:{flexDirection:'row',flexWrap:'wrap',gap:10},tile:{width:'48%',backgroundColor:'#12313a',borderColor:'#28515d',borderWidth:1,borderRadius:16,padding:16,minHeight:110},
- tileTitle:{color:'#fff',fontWeight:'800',fontSize:18,marginBottom:5},card:{backgroundColor:'#0d232a',borderColor:'#20404a',borderWidth:1,borderRadius:18,padding:17,marginTop:13},
- evidence:{backgroundColor:'#0b2b34',borderColor:'#28515d',borderWidth:1,borderRadius:12,padding:12,marginTop:10},
- input:{backgroundColor:'#0d232a',borderColor:'#20404a',borderWidth:1,borderRadius:13,padding:14,color:'#fff',fontSize:16,marginBottom:10},
- primary:{backgroundColor:'#36c45b',borderRadius:13,padding:15,marginTop:8},primaryText:{textAlign:'center',fontWeight:'900',color:'#06220e'},
- secondary:{backgroundColor:'#14333c',borderColor:'#2a4c55',borderWidth:1,borderRadius:13,padding:14,marginTop:8},
- row:{flexDirection:'row',gap:10,marginBottom:10},secondaryHalf:{flex:1,backgroundColor:'#14333c',borderColor:'#2a4c55',borderWidth:1,borderRadius:13,padding:14},
- disabled:{opacity:.55},stopBox:{backgroundColor:'#4a2020',borderColor:'#ff7a7a',borderWidth:1,borderRadius:14,padding:14,marginTop:12},stopTitle:{color:'#ffc7c7',fontWeight:'900',fontSize:16,marginBottom:6}
+ tileTitle:{color:'#fff',fontWeight:'800',fontSize:18,marginBottom:5},card:{backgroundColor:'rgba(7,35,50,0.94)',borderColor:'#178bc1',borderWidth:1,borderRadius:18,padding:17,marginTop:13},
+ evidence:{backgroundColor:'rgba(7,31,48,0.95)',borderColor:'#236b8d',borderWidth:1,borderRadius:12,padding:12,marginTop:10},
+ input:{backgroundColor:'rgba(7,30,45,0.96)',borderColor:'#2c7fa8',borderWidth:1,borderRadius:13,padding:14,color:'#fff',fontSize:16,marginBottom:10},
+ primary:{backgroundColor:'#35d65d',borderRadius:13,padding:15,marginTop:8},primaryText:{textAlign:'center',fontWeight:'900',color:'#06220e'},
+ secondary:{backgroundColor:'rgba(11,43,65,0.96)',borderColor:'#2c79a3',borderWidth:1,borderRadius:13,padding:14,marginTop:8},
+ row:{flexDirection:'row',gap:10,marginBottom:10},secondaryHalf:{flex:1,backgroundColor:'rgba(11,43,65,0.96)',borderColor:'#2c79a3',borderWidth:1,borderRadius:13,padding:14},
+ cardHeader:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',gap:8,marginBottom:8},riskPill:{borderRadius:999,paddingHorizontal:10,paddingVertical:5},riskGreen:{backgroundColor:'#0a6128'},riskYellow:{backgroundColor:'#725c0a'},riskRed:{backgroundColor:'#7a2424'},riskText:{color:'#fff',fontWeight:'800',fontSize:12},evidenceTitle:{color:'#52bfff',fontWeight:'800',fontSize:14,marginBottom:4},contextAction:{flex:1,backgroundColor:'#0c3b58',borderColor:'#1db4e9',borderWidth:1,borderRadius:13,padding:12,marginTop:10},contextText:{color:'#bfefff',fontWeight:'800',textAlign:'center'},thinking:{flexDirection:'row',gap:12,alignItems:'center',backgroundColor:'#092f48',borderColor:'#1db4e9',borderWidth:1,borderRadius:14,padding:14,marginTop:12},thinkingTitle:{color:'#fff',fontWeight:'800',marginBottom:3},pauseBox:{backgroundColor:'#123345',borderColor:'#46b9e8',borderWidth:1,borderRadius:14,padding:14,marginTop:12},pauseTitle:{color:'#7fd8ff',fontWeight:'900',fontSize:17,marginBottom:6},outcomeButton:{backgroundColor:'#0d3045',borderColor:'#2b7698',borderWidth:1,borderRadius:13,padding:14,marginTop:12},outcomeText:{color:'#d9edf6',textAlign:'center',fontWeight:'800'},disabled:{opacity:.55},stopBox:{backgroundColor:'#4a2020',borderColor:'#ff7a7a',borderWidth:1,borderRadius:14,padding:14,marginTop:12},stopTitle:{color:'#ffc7c7',fontWeight:'900',fontSize:16,marginBottom:6}
 });
