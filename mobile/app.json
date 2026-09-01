@@ -37,6 +37,13 @@
     },
     "runtimeVersion": {
       "policy": "appVersion"
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "751be404-bdbb-43a9-986e-c586cd0ca02b"
+      }
+    },
+    "owner": "manderson1031"
   }
 }
