@@ -47,6 +47,19 @@ export type HardwareScanResult={
   };
 };
 
+export type HardwareReplacementPlan={
+  kind:HardwareKind;
+  readiness:string;
+  search_ready:boolean;
+  exact_replacement_ready:boolean;
+  confidence:number;
+  preferred_candidate?:HardwareCandidate|null;
+  search_query:string;
+  missing_evidence:string[];
+  evidence:Record<string,unknown>;
+  warning?:string|null;
+};
+
 async function jsonRequest<T>(url:string,token:string,init:RequestInit,timeoutMs:number):Promise<T>{
   const controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),timeoutMs);
@@ -119,5 +132,18 @@ export async function fuseHardwareThread(options:{
       crest_positions_px:options.crestPositionsPx,
       mm_per_pixel:options.mmPerPixel
     })
+  },options.timeoutMs??15000);
+}
+
+export async function planHardwareReplacement(options:{
+  apiBase:string;
+  token:string;
+  scan:HardwareScanResult;
+  timeoutMs?:number;
+}):Promise<HardwareReplacementPlan>{
+  return jsonRequest<HardwareReplacementPlan>(`${options.apiBase}/hardware/replacement-plan`,options.token,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({scan:options.scan})
   },options.timeoutMs??15000);
 }
