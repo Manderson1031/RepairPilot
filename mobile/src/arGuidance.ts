@@ -2,26 +2,59 @@ import {Platform} from 'react-native';
 import RepairPilotAR from '../modules/repairpilot-ar';
 
 export type ARPoint={x:number;y:number};
-export type ARAnchorPlacement={id:string;position:{x:number;y:number;z:number}};
+export type ARAnchorPlacement={id:string;confidence?:number;position:{x:number;y:number;z:number}};
 export type ARProjectedAnchor={visible:boolean;x:number;y:number;depth:number};
+export type ARSnapshot={imageUri:string;width:number;height:number;depthAvailable:boolean};
 
-export async function arAvailability():Promise<{available:boolean;reason?:string}>{
-  if(Platform.OS!=='ios')return {available:false,reason:'Native spatial guidance is currently supported on iOS.'};
-  if(!RepairPilotAR)return {available:false,reason:'This build does not include the RepairPilot AR native module.'};
+export async function arAvailability():Promise<{available:boolean;depthAvailable:boolean;reason?:string}>{
+  if(Platform.OS!=='ios')return {available:false,depthAvailable:false,reason:'Native spatial guidance is currently supported on iOS.'};
+  if(!RepairPilotAR)return {available:false,depthAvailable:false,reason:'This build does not include the RepairPilot AR native module.'};
   try{
-    return await RepairPilotAR.isSupported()?{available:true}:{available:false,reason:'ARKit world tracking is not supported on this device.'};
+    const supported=await RepairPilotAR.isSupported();
+    if(!supported)return {available:false,depthAvailable:false,reason:'ARKit world tracking is not supported on this device.'};
+    const depthAvailable=await RepairPilotAR.isDepthSupported();
+    return {
+      available:true,
+      depthAvailable,
+      reason:depthAvailable?'ARKit world tracking and scene-depth anchoring are available.':'ARKit world tracking is available, but scene-depth anchoring is not supported on this device.'
+    };
   }catch{
-    return {available:false,reason:'AR capability could not be verified on this device.'};
+    return {available:false,depthAvailable:false,reason:'AR capability could not be verified on this device.'};
   }
 }
 
-export async function startARSession():Promise<void>{
+export async function startARSession():Promise<{depthAvailable:boolean}>{
   if(!RepairPilotAR)throw new Error('RepairPilot AR is unavailable in this build.');
-  await RepairPilotAR.startSession();
+  const result=await RepairPilotAR.startSession();
+  return {depthAvailable:!!result?.depth};
 }
 
 export async function stopARSession():Promise<void>{
   if(RepairPilotAR)await RepairPilotAR.stopSession();
+}
+
+function snapshotResult(snapshot:any):ARSnapshot{
+  return {
+    imageUri:`data:${snapshot?.mime_type||'image/jpeg'};base64,${snapshot?.image_base64||''}`,
+    width:Number(snapshot?.width)||0,
+    height:Number(snapshot?.height)||0,
+    depthAvailable:!!snapshot?.depth_available,
+  };
+}
+
+export async function captureARTargetSnapshot():Promise<ARSnapshot>{
+  if(!RepairPilotAR)throw new Error('RepairPilot AR is unavailable in this build.');
+  return snapshotResult(await RepairPilotAR.captureTargetSnapshot());
+}
+
+export async function captureARLiveSnapshot():Promise<ARSnapshot>{
+  if(!RepairPilotAR)throw new Error('RepairPilot AR is unavailable in this build.');
+  return snapshotResult(await RepairPilotAR.captureLiveSnapshot());
+}
+
+export async function placeDepthARAnchor(point:ARPoint):Promise<ARAnchorPlacement>{
+  if(!RepairPilotAR)throw new Error('RepairPilot AR is unavailable in this build.');
+  return RepairPilotAR.anchorAtFrozenDepthPoint(point);
 }
 
 export async function placeARAnchor(point:ARPoint,depthMeters:number):Promise<ARAnchorPlacement>{
