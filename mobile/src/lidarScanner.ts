@@ -1,5 +1,5 @@
 import {Platform} from 'react-native';
-import {requireOptionalNativeModule} from 'expo-modules-core';
+import RepairPilotLidarNative,{LidarPoint,LidarPointMeasurement} from '../modules/repairpilot-lidar';
 
 export type LidarMeasurement={
   diameter_mm?:number|null;
@@ -9,18 +9,13 @@ export type LidarMeasurement={
   thread_pitch_mm?:number|null;
 };
 
-export type LidarPoint={x:number;y:number};
+export type {LidarPoint,LidarPointMeasurement};
 export type LidarSnapshot={
   imageUri:string;
   width:number;
   height:number;
   depthWidth:number;
   depthHeight:number;
-};
-export type LidarPointMeasurement={
-  distance_mm:number;
-  confidence:number;
-  depth_m:{start:number;end:number};
 };
 
 export type LidarCaptureResult={
@@ -31,22 +26,7 @@ export type LidarCaptureResult={
   reason?:string;
 };
 
-type NativeRepairPilotLidar={
-  isSupported:()=>Promise<boolean>;
-  startSession:()=>Promise<{running:boolean}>;
-  stopSession:()=>Promise<void>;
-  captureDepthSnapshot:()=>Promise<{
-    image_base64:string;
-    mime_type:string;
-    width:number;
-    height:number;
-    depth_width:number;
-    depth_height:number;
-  }>;
-  measureBetweenPoints:(start:LidarPoint,end:LidarPoint)=>Promise<LidarPointMeasurement>;
-};
-
-const nativeModule=requireOptionalNativeModule<NativeRepairPilotLidar>('RepairPilotLidar');
+const nativeModule=RepairPilotLidarNative;
 
 export async function lidarAvailability():Promise<{available:boolean;reason?:string}>{
   if(Platform.OS!=='ios')return {available:false,reason:'LiDAR hardware scanning is currently supported only on compatible iPhone and iPad models.'};
