@@ -48,6 +48,14 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
+      - name: Create Supabase-compatible database roles
+        run: |
+          PGPASSWORD=repairpilot_ci psql -h 127.0.0.1 -U repairpilot -d repairpilot -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN CREATE ROLE anon NOLOGIN; END IF;
+            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN CREATE ROLE authenticated NOLOGIN; END IF;
+          END $$;
+          SQL
       - run: python tests/db_smoke.py
         env:
           PYTHONPATH: .
