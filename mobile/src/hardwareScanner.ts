@@ -13,6 +13,8 @@ export type HardwareCandidate={
   name?:string;
   reason?:string;
   confidence?:number;
+  system?:'metric'|'inch'|string;
+  thread_confirmed?:boolean;
   [key:string]:unknown;
 };
 
@@ -31,6 +33,11 @@ export type HardwareScanResult={
     source:string;
     confidence:number;
     fields?:string[];
+  };
+  size_resolution?:{
+    candidate_count:number;
+    thread_confirmed:boolean;
+    basis:string;
   };
 };
 
