@@ -10,6 +10,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from .models import *
 from .vision import analyze_image
+from .hardware_scanner import analyze_hardware_image
 from .engine import diagnose as run_diagnose
 from .authdb import *
 from .config import settings
@@ -42,8 +43,6 @@ def user_from_credentials(credentials:HTTPAuthorizationCredentials|None,admin=Fa
     if not account: raise HTTPException(401,"Account no longer exists.")
     if int(claims.get("ver",0) or 0)!=int(account.get("token_version",0) or 0):
         raise HTTPException(401,"Session has been invalidated. Please log in again.")
-    # Role and email come from the database, not stale JWT claims. This makes
-    # account deletion and role changes effective immediately.
     u={"sub":account["id"],"email":account["email"],"role":account.get("role","tester")}
     if admin and u.get("role")!="admin": raise HTTPException(403,"Admin access required.")
     return u
@@ -71,7 +70,6 @@ def login(payload:dict):
     user=verify(str(payload.get("email","")),str(payload.get("password","")))
     if not user: raise HTTPException(401,"Invalid email or password.")
     return {"token":token_for(user),"user":{"id":user["id"],"email":user["email"],"role":user.get("role","tester")}}
-
 
 @app.post("/auth/password-reset/request")
 def password_reset_request(payload:dict):
@@ -174,7 +172,6 @@ def repair_report(repair_id:str,credentials:HTTPAuthorizationCredentials|None=De
     c.save(); buf.seek(0)
     return StreamingResponse(buf,media_type="application/pdf",headers={"Content-Disposition":f'attachment; filename="repairpilot_{repair_id}.pdf"'})
 
-
 async def read_capped(file:UploadFile,max_bytes:int)->bytes:
     data=await file.read(max_bytes+1)
     if len(data)>max_bytes: raise HTTPException(413,"Upload exceeds configured size limit.")
@@ -196,6 +193,21 @@ async def photo_analyze(request:Request,equipment_id:str=Form(...),file:UploadFi
         iid=add_image(u["sub"],equipment_id,file.filename or "image.jpg",result.description,result.model_dump())
         result.upload_id=iid
         audit(u["sub"],"photo.analyzed","image",iid,{"equipment_id":equipment_id,"filename":file.filename or "image.jpg","confidence":result.confidence})
+        return result
+    finally: temp.unlink(missing_ok=True)
+
+@app.post("/hardware/scan")
+@limiter.limit("20/minute")
+async def hardware_scan(request:Request,kind:str=Form("OTHER"),file:UploadFile=File(...),credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
+    u=user_from_credentials(credentials)
+    if not (file.content_type or "").startswith("image/"): raise HTTPException(400,"Upload an image file.")
+    data=await read_capped(file,settings.max_image_mb*1024*1024)
+    suffix=Path(file.filename or "hardware.jpg").suffix or ".jpg"
+    with tempfile.NamedTemporaryFile(delete=False,suffix=suffix) as tmp:
+        tmp.write(data); temp=Path(tmp.name)
+    try:
+        result=analyze_hardware_image(temp,file.filename or "hardware.jpg",kind)
+        audit(u["sub"],"hardware.scanned","hardware","",{"kind":result.get("kind","OTHER"),"filename":file.filename or "hardware.jpg","confidence":result.get("confidence",0.0),"needs_reference_scale":result.get("needs_reference_scale",True)})
         return result
     finally: temp.unlink(missing_ok=True)
 
@@ -245,8 +257,6 @@ def diagnose(request:Request,req:DiagnoseRequest,credentials:HTTPAuthorizationCr
     if req.equipment_profile.id:
         stored=get_equipment(u["sub"],req.equipment_profile.id)
         if not stored: raise HTTPException(404,"Equipment not found.")
-        # The database profile is authoritative; do not let a client spoof model details
-        # while referencing an existing equipment id.
         req.equipment_profile=equipment_profile_from_record(stored)
     query=req.symptom+" "+" ".join(x.answer for x in req.history[-3:])
     manual=search_manual(u["sub"],req.equipment_profile.id,query) if req.equipment_profile.id else []
@@ -283,7 +293,6 @@ def feedback(payload:dict,credentials:HTTPAuthorizationCredentials|None=Depends(
 def analytics(credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
     u=user_from_credentials(credentials); return feedback_stats(u["sub"])
 
-
 @app.get("/audit")
 def my_audit(credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
     u=user_from_credentials(credentials); return audit_recent(u["sub"],100)
@@ -291,7 +300,6 @@ def my_audit(credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme
 @app.get("/admin/audit")
 def admin_audit(credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
     user_from_credentials(credentials,admin=True); return audit_recent(None,200)
-
 
 @app.get("/account/export")
 def account_export(credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
@@ -310,7 +318,6 @@ def account_delete(credentials:HTTPAuthorizationCredentials|None=Depends(bearer_
 def metrics(credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme)):
     user_from_credentials(credentials,admin=True)
     return admin_metrics()
-
 
 @app.get("/ready")
 def ready():
@@ -333,7 +340,6 @@ def ready():
         "error_reporting":bool(settings.sentry_dsn)
     }
     return JSONResponse(status_code=200 if payload["ok"] else 503,content=payload)
-
 
 @app.get("/admin/unresolved")
 def unresolved(credentials:HTTPAuthorizationCredentials|None=Depends(bearer_scheme),limit:int=100):
