@@ -1,6 +1,8 @@
 import ExpoModulesCore
 import ARKit
 import CoreVideo
+import CoreImage
+import UIKit
 import simd
 
 private enum RepairPilotLidarError: Error {
@@ -9,11 +11,15 @@ private enum RepairPilotLidarError: Error {
   case depthUnavailable
   case invalidPoint
   case invalidDepth
+  case imageEncodingFailed
 }
 
 private final class RepairPilotLidarSession {
   let session = ARSession()
   var running = false
+  private var frozenFrame: ARFrame?
+  private var frozenDepth: ARDepthData?
+  private let imageContext = CIContext(options: [.cacheIntermediates: false])
 
   func supported() -> Bool {
     ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth)
@@ -24,6 +30,8 @@ private final class RepairPilotLidarSession {
     let configuration = ARWorldTrackingConfiguration()
     configuration.frameSemantics.insert(.sceneDepth)
     configuration.worldAlignment = .gravity
+    frozenFrame = nil
+    frozenDepth = nil
     session.run(configuration, options: [.resetTracking, .removeExistingAnchors])
     running = true
   }
@@ -31,6 +39,8 @@ private final class RepairPilotLidarSession {
   func stop() {
     session.pause()
     running = false
+    frozenFrame = nil
+    frozenDepth = nil
   }
 
   func depthFrame() throws -> (ARFrame, ARDepthData) {
@@ -42,6 +52,30 @@ private final class RepairPilotLidarSession {
       Thread.sleep(forTimeInterval: 0.05)
     }
     throw RepairPilotLidarError.depthUnavailable
+  }
+
+  func freezeSnapshot() throws -> [String: Any] {
+    let (frame, depth) = try depthFrame()
+    frozenFrame = frame
+    frozenDepth = depth
+
+    let image = CIImage(cvPixelBuffer: frame.capturedImage)
+    guard let cgImage = imageContext.createCGImage(image, from: image.extent) else {
+      throw RepairPilotLidarError.imageEncodingFailed
+    }
+    let uiImage = UIImage(cgImage: cgImage)
+    guard let jpeg = uiImage.jpegData(compressionQuality: 0.82) else {
+      throw RepairPilotLidarError.imageEncodingFailed
+    }
+
+    return [
+      "image_base64": jpeg.base64EncodedString(),
+      "mime_type": "image/jpeg",
+      "width": CVPixelBufferGetWidth(frame.capturedImage),
+      "height": CVPixelBufferGetHeight(frame.capturedImage),
+      "depth_width": CVPixelBufferGetWidth(depth.depthMap),
+      "depth_height": CVPixelBufferGetHeight(depth.depthMap)
+    ]
   }
 
   private func medianDepth(
@@ -95,7 +129,14 @@ private final class RepairPilotLidarSession {
       throw RepairPilotLidarError.invalidPoint
     }
 
-    let (frame, depthData) = try depthFrame()
+    let pair: (ARFrame, ARDepthData)
+    if let frame = frozenFrame, let depth = frozenDepth {
+      pair = (frame, depth)
+    } else {
+      pair = try depthFrame()
+    }
+    let frame = pair.0
+    let depthData = pair.1
     let depthMap = depthData.depthMap
     let confidenceMap = depthData.confidenceMap
     let depthWidth = CVPixelBufferGetWidth(depthMap)
@@ -123,7 +164,6 @@ private final class RepairPilotLidarSession {
     let fy = intrinsics.columns.1.y
     let cx = intrinsics.columns.2.x
     let cy = intrinsics.columns.2.y
-
     guard fx > 0, fy > 0 else { throw RepairPilotLidarError.invalidDepth }
 
     let startPoint = SIMD3<Float>(
@@ -144,10 +184,7 @@ private final class RepairPilotLidarSession {
     return [
       "distance_mm": Double(distanceMM),
       "confidence": Double(confidence),
-      "depth_m": [
-        "start": Double(startDepth),
-        "end": Double(endDepth)
-      ]
+      "depth_m": ["start": Double(startDepth), "end": Double(endDepth)]
     ]
   }
 }
@@ -169,6 +206,10 @@ public class RepairPilotLidarModule: Module {
 
     AsyncFunction("stopSession") { () -> Void in
       self.lidar.stop()
+    }
+
+    AsyncFunction("captureDepthSnapshot") { () -> [String: Any] in
+      try self.lidar.freezeSnapshot()
     }
 
     AsyncFunction("measureBetweenPoints") { (start: [String: Double], end: [String: Double]) -> [String: Any] in
