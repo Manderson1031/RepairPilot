@@ -1,0 +1,41 @@
+name: RepairPilot Typecheck Fix
+on:
+  push:
+    paths:
+      - '.github/workflows/typecheck-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-mobile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Apply exact compatibility replacements
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          replacements = {
+              Path('mobile/app/ar-assist.tsx'): [('StyleSheet.absoluteFillObject', 'StyleSheet.absoluteFill')],
+              Path('mobile/app/hardware-scanner.tsx'): [('StyleSheet.absoluteFillObject', 'StyleSheet.absoluteFill')],
+              Path('mobile/app/index.tsx'): [('calendar-wrench', 'calendar-clock-outline')],
+          }
+          for path, pairs in replacements.items():
+              text = path.read_text()
+              for old, new in pairs:
+                  if old not in text:
+                      raise SystemExit(f'Expected text {old!r} not found in {path}')
+                  text = text.replace(old, new)
+              path.write_text(text)
+          PY
+      - name: Commit compatibility fixes and remove one-time workflow
+        run: |
+          rm .github/workflows/typecheck-fix.yml
+          git config user.name 'RepairPilot Automation'
+          git config user.email 'actions@users.noreply.github.com'
+          git add mobile/app/ar-assist.tsx mobile/app/hardware-scanner.tsx mobile/app/index.tsx .github/workflows/typecheck-fix.yml
+          git commit -m 'Fix mobile TypeScript compatibility issues'
+          git push origin main
