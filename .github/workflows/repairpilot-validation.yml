@@ -1,0 +1,34 @@
+name: RepairPilot validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  mobile-typescript:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+
+  hardware-backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r backend/requirements.txt
+      - run: pytest backend/tests/test_hardware_depth.py backend/tests/test_hardware_measurement.py -q
