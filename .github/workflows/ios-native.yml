@@ -1,0 +1,47 @@
+name: RepairPilot iOS Native
+
+on:
+  push:
+    paths:
+      - 'mobile/modules/**'
+      - 'mobile/app.json'
+      - 'mobile/package.json'
+      - 'mobile/package-lock.json'
+      - '.github/workflows/ios-native.yml'
+  pull_request:
+    paths:
+      - 'mobile/modules/**'
+      - 'mobile/app.json'
+      - 'mobile/package.json'
+      - 'mobile/package-lock.json'
+      - '.github/workflows/ios-native.yml'
+
+jobs:
+  ios-native-build:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci
+      - name: Generate iOS project and autolink local Expo modules
+        run: npx expo prebuild --platform ios --clean --no-install
+      - name: Install CocoaPods dependencies
+        run: npx pod-install ios
+      - name: Build iOS simulator app
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -workspace ios/RepairPilot.xcworkspace \
+            -scheme RepairPilot \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
