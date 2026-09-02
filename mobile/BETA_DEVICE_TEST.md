@@ -18,6 +18,27 @@ npx expo start --tunnel
 
 Open the QR code with the iPhone camera and launch it in Expo Go. This first smoke test does not require creating an App Store build.
 
+## Visual screen preview (no app build required)
+From the `mobile` directory, run:
+
+```bash
+npm run preview
+```
+
+Open the QR code in Expo Go. Tap the amber monitor/eye button in the header to
+switch directly among Home, Equipment, AI Diagnosis, Diagnostics, Scanner,
+AR Assistant, Maintenance, and Account & Privacy. The amber preview banner is
+always visible, sample display records remain local, and every backend write is
+disabled.
+
+For a specific first screen, run the Expo command directly, for example:
+
+```bash
+EXPO_PUBLIC_PREVIEW_MODE=true EXPO_PUBLIC_PREVIEW_SCREEN=diagnose npx expo start --tunnel
+```
+
+Set `EXPO_PUBLIC_PREVIEW_MODE=false` before normal account or backend testing.
+
 ## Native internal beta after the smoke test
 The `preview` EAS profile uses internal distribution. For iOS this requires an Apple Developer account and a registered test device. When that point is reached:
 
