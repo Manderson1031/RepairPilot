@@ -288,7 +288,7 @@ export default function App(){
    <FeatureTile icon="cube-scan" title="AR ASSISTANT" sub="Visual guidance" badge="NEW" onPress={()=>nav('ar')}/>
    <FeatureTile icon="tractor" title="MY EQUIPMENT" sub="Manage machines" onPress={async()=>{await loadEquipment();nav('equipment')}}/>
    <FeatureTile icon="clipboard-text-outline" title="DIAGNOSTICS" sub="Repairs & reports" onPress={loadHistory}/>
-   <FeatureTile icon="calendar-wrench" title="MAINTENANCE" sub="Service reminders" onPress={()=>nav('maintenance')}/>
+   <FeatureTile icon="calendar-clock-outline" title="MAINTENANCE" sub="Service reminders" onPress={()=>nav('maintenance')}/>
   </View>
   <View style={s.activityHeader}><Text style={s.sectionTitle}>RECENT ACTIVITY</Text><TouchableOpacity onPress={loadHistory}><Text style={s.viewAll}>VIEW ALL</Text></TouchableOpacity></View>
   <TouchableOpacity style={s.recentRow} onPress={()=>openEquipment(PREVIEW_EQUIPMENT[1])}><MaterialCommunityIcons name="excavator" size={28} color="#ffb000"/><View style={s.recentInfo}><Text style={s.recentTitle}>CAT 320 Excavator</Text><Text style={s.recentSub}>Hydraulic System</Text></View><View style={s.recentStatus}><Text style={s.completed}>COMPLETED</Text><Text style={s.recentDate}>May 20, 2025</Text></View></TouchableOpacity>
@@ -311,7 +311,7 @@ export default function App(){
  </ScrollView><BottomNav active="ar"/></SafeAreaView>;
 
  if(screen==='maintenance')return <SafeAreaView style={s.safe}><StatusBar style="light"/><GearBackdrop/><TopBar title="MAINTENANCE" back="home"/><ScrollView contentContainerStyle={s.dashboardWrap}>
-  <SectionHeader>MAINTENANCE REMINDERS</SectionHeader><View style={s.emptyIndustrial}><MaterialCommunityIcons name="calendar-wrench" size={50} color="#ffb000"/><Text style={s.activityTitle}>No maintenance reminders yet</Text><Text style={s.featureSub}>Maintenance schedules will be tied to your real equipment profiles—no sample machines or fake due dates.</Text></View>
+  <SectionHeader>MAINTENANCE REMINDERS</SectionHeader><View style={s.emptyIndustrial}><MaterialCommunityIcons name="calendar-clock-outline" size={50} color="#ffb000"/><Text style={s.activityTitle}>No maintenance reminders yet</Text><Text style={s.featureSub}>Maintenance schedules will be tied to your real equipment profiles—no sample machines or fake due dates.</Text></View>
  </ScrollView><BottomNav active="home"/></SafeAreaView>;
 
  if(screen==='settings')return <SafeAreaView style={s.safe}><StatusBar style="light"/><GearBackdrop/><TopBar title="ACCOUNT & PRIVACY" back="home"/><ScrollView contentContainerStyle={s.dashboardWrap}>
