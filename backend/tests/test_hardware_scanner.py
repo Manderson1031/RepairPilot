@@ -1,7 +1,4 @@
-import os
-from pathlib import Path
-
-from app.hardware_scanner import analyze_hardware_image
+from app.hardware_scanner import _normalize_result, analyze_hardware_image
 
 
 def test_scanner_without_ai_does_not_invent_measurements(tmp_path, monkeypatch):
@@ -27,3 +24,37 @@ def test_scanner_normalizes_unknown_category(tmp_path, monkeypatch):
     result = analyze_hardware_image(image, "part.jpg", "mystery")
 
     assert result["kind"] == "OTHER"
+
+
+def test_server_withholds_model_dimensions_when_reference_is_not_confirmed():
+    result = _normalize_result({
+        "identified_part": "hex bolt",
+        "standard": "",
+        "measurements": {"diameter_mm": 10, "length_mm": 40, "thread_pitch_mm": 1.5, "threads_per_inch": 16.93, "width_mm": None, "height_mm": None},
+        "markings": [],
+        "candidate_matches": [],
+        "confidence": .8,
+        "needs_reference_scale": True,
+        "warnings": [],
+    }, "FASTENER")
+
+    assert all(value is None for value in result["measurements"].values())
+    assert any("withheld" in warning.lower() for warning in result["warnings"])
+
+
+def test_server_accepts_positive_measurements_only_after_reference_is_confirmed():
+    result = _normalize_result({
+        "identified_part": "hex bolt",
+        "standard": "",
+        "measurements": {"diameter_mm": 10, "length_mm": 40, "thread_pitch_mm": 1.5, "threads_per_inch": 16.93, "width_mm": -2, "height_mm": None},
+        "markings": ["8.8"],
+        "candidate_matches": [],
+        "confidence": 3,
+        "needs_reference_scale": False,
+        "warnings": [],
+    }, "FASTENER")
+
+    assert result["measurements"]["diameter_mm"] == 10
+    assert result["measurements"]["thread_pitch_mm"] == 1.5
+    assert result["measurements"]["width_mm"] is None
+    assert result["confidence"] == 1.0
