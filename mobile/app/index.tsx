@@ -183,7 +183,11 @@ export default function App(){
  const resumePaused=()=>{if(last?.status!=='paused')return;setLast({...last,status:'ask'});setTimeout(()=>diagnosisScroll.current?.scrollToEnd({animated:true}),100)};
  const evidenceLabel=(source:string)=>({user_measurement:'Your result',visual:'Observation',general:'Diagnostic context',manual:'Manual reference'} as any)[source]||'Evidence';
  const needsContextPhoto=()=>{const q=(last?.next_step?.question||'').toLowerCase();return /photo|label|spark plug|nameplate|identification|serial/.test(q)};
- const nav=(to:Screen)=>setScreen(to);
+ const nav=(to:Screen)=>{
+   if(!previewMode&&to==='scanner'){void Linking.openURL('repairpilot://hardware-scanner').catch(()=>setScreen(to));return}
+   if(!previewMode&&to==='ar'){void Linking.openURL('repairpilot://ar-assist').catch(()=>setScreen(to));return}
+   setScreen(to)
+ };
  const symptomSelected=(item:string)=>symptom.split(';').map(x=>x.trim()).includes(item);
  const toggleSymptom=(item:string)=>{
    const items=symptom.split(';').map(x=>x.trim()).filter(Boolean);
