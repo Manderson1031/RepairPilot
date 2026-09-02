@@ -26,7 +26,28 @@ export type HardwareScanResult={
   confidence:number;
   needs_reference_scale:boolean;
   warnings:string[];
+  depth_measurement?:{
+    applied:boolean;
+    source:string;
+    confidence:number;
+    fields?:string[];
+  };
 };
+
+async function jsonRequest<T>(url:string,token:string,init:RequestInit,timeoutMs:number):Promise<T>{
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),timeoutMs);
+  try{
+    const response=await fetch(url,{...init,headers:{...(init.headers||{}),Authorization:`Bearer ${token}`},signal:controller.signal});
+    let payload:any={};
+    try{payload=await response.json()}catch{}
+    if(!response.ok)throw new Error(payload?.detail||'RepairPilot request failed.');
+    return payload as T;
+  }catch(error:any){
+    if(error?.name==='AbortError')throw new Error('RepairPilot timed out. Check your connection and try again.');
+    throw error;
+  }finally{clearTimeout(timer)}
+}
 
 export async function scanHardwarePhoto(options:{
   apiBase:string;
@@ -38,30 +59,33 @@ export async function scanHardwarePhoto(options:{
   timeoutMs?:number;
 }):Promise<HardwareScanResult>{
   const {apiBase,token,uri,kind}=options;
-  const controller=new AbortController();
-  const timer=setTimeout(()=>controller.abort(),options.timeoutMs??30000);
-  try{
-    const form=new FormData();
-    form.append('kind',kind);
-    form.append('file',{
-      uri,
-      name:options.fileName||'repairpilot-hardware.jpg',
-      type:options.mimeType||'image/jpeg'
-    } as any);
-    const response=await fetch(`${apiBase}/hardware/scan`,{
-      method:'POST',
-      headers:{Authorization:`Bearer ${token}`},
-      body:form,
-      signal:controller.signal
-    });
-    let payload:any={};
-    try{payload=await response.json()}catch{}
-    if(!response.ok)throw new Error(payload?.detail||'Hardware scan failed.');
-    return payload as HardwareScanResult;
-  }catch(error:any){
-    if(error?.name==='AbortError')throw new Error('Hardware scan timed out. Check your connection and try again.');
-    throw error;
-  }finally{
-    clearTimeout(timer);
-  }
+  const form=new FormData();
+  form.append('kind',kind);
+  form.append('file',{
+    uri,
+    name:options.fileName||'repairpilot-hardware.jpg',
+    type:options.mimeType||'image/jpeg'
+  } as any);
+  return jsonRequest<HardwareScanResult>(`${apiBase}/hardware/scan`,token,{method:'POST',body:form},options.timeoutMs??30000);
+}
+
+export async function fuseHardwareDepth(options:{
+  apiBase:string;
+  token:string;
+  scan:HardwareScanResult;
+  measurements:Partial<HardwareMeasurements>;
+  confidence:number;
+  source?:string;
+  timeoutMs?:number;
+}):Promise<HardwareScanResult>{
+  return jsonRequest<HardwareScanResult>(`${options.apiBase}/hardware/fuse-depth`,options.token,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      scan:options.scan,
+      measurements:options.measurements,
+      confidence:options.confidence,
+      source:options.source||'arkit_lidar'
+    })
+  },options.timeoutMs??15000);
 }
