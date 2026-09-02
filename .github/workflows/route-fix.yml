@@ -1,0 +1,37 @@
+name: RepairPilot Route Integration
+on:
+  push:
+    paths:
+      - '.github/workflows/route-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  integrate-routes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Route production scanner and AR tiles to Expo Router screens
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('mobile/app/index.tsx')
+          text = path.read_text()
+          old = " const nav=(to:Screen)=>setScreen(to);"
+          new = """ const nav=(to:Screen)=>{\n   if(!previewMode&&to==='scanner'){void Linking.openURL('repairpilot://hardware-scanner').catch(()=>setScreen(to));return}\n   if(!previewMode&&to==='ar'){void Linking.openURL('repairpilot://ar-assist').catch(()=>setScreen(to));return}\n   setScreen(to)\n };"""
+          if old not in text:
+              raise SystemExit('Expected nav function was not found; refusing to modify index.tsx')
+          text = text.replace(old, new, 1)
+          path.write_text(text)
+          PY
+      - name: Remove one-time workflow and commit route integration
+        run: |
+          rm .github/workflows/route-fix.yml
+          git config user.name 'RepairPilot Automation'
+          git config user.email 'actions@users.noreply.github.com'
+          git add mobile/app/index.tsx .github/workflows/route-fix.yml
+          git commit -m 'Route dashboard scanner and AR to functional screens'
+          git push origin main
