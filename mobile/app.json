@@ -2,7 +2,7 @@
   "expo": {
     "name": "RepairPilot",
     "slug": "repairpilot",
-    "version": "0.21.0",
+    "version": "0.23.0",
     "scheme": "repairpilot",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
@@ -21,8 +21,7 @@
           "photosPermission": "Allow RepairPilot to access selected equipment photos for diagnosis.",
           "microphonePermission": false
         }
-      ],
-      "expo-sharing"
+      ]
     ],
     "ios": {
       "supportsTablet": true,
@@ -30,11 +29,11 @@
         "usesNonExemptEncryption": false
       },
       "bundleIdentifier": "com.repairpilot.app",
-      "buildNumber": "21"
+      "buildNumber": "23"
     },
     "android": {
       "package": "com.repairpilot.app",
-      "versionCode": 21,
+      "versionCode": 23,
       "adaptiveIcon": {
         "foregroundImage": "./assets/repairpilot-icon.png",
         "backgroundColor": "#031018"
