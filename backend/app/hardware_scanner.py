@@ -6,25 +6,79 @@ from pathlib import Path
 from typing import Any
 
 
+MEASUREMENT_KEYS = (
+    "diameter_mm",
+    "length_mm",
+    "thread_pitch_mm",
+    "threads_per_inch",
+    "width_mm",
+    "height_mm",
+)
+VALID_KINDS = {"FASTENER", "FITTING", "BEARING", "OTHER"}
+
+
+def _empty_measurements() -> dict[str, None]:
+    return {key: None for key in MEASUREMENT_KEYS}
+
+
 def _empty_result(kind: str, reason: str) -> dict[str, Any]:
     return {
         "kind": kind,
         "identified_part": "",
         "standard": "",
-        "measurements": {
-            "diameter_mm": None,
-            "length_mm": None,
-            "thread_pitch_mm": None,
-            "threads_per_inch": None,
-            "width_mm": None,
-            "height_mm": None,
-        },
+        "measurements": _empty_measurements(),
         "markings": [],
         "candidate_matches": [],
         "confidence": 0.0,
         "needs_reference_scale": True,
         "warnings": [reason],
     }
+
+
+def _normalize_result(result: dict[str, Any], kind: str) -> dict[str, Any]:
+    """Apply server-side safety rules after model output is parsed."""
+    out = _empty_result(kind, "")
+    out["warnings"] = []
+    out["identified_part"] = str(result.get("identified_part") or "").strip()[:300]
+    out["standard"] = str(result.get("standard") or "").strip()[:300]
+    out["markings"] = [str(x).strip()[:200] for x in (result.get("markings") or []) if str(x).strip()][:20]
+
+    candidates = []
+    for item in result.get("candidate_matches") or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()[:300]
+        reason = str(item.get("reason") or "").strip()[:600]
+        if name:
+            candidates.append({"name": name, "reason": reason})
+    out["candidate_matches"] = candidates[:10]
+
+    try:
+        confidence = float(result.get("confidence", 0.0))
+    except (TypeError, ValueError):
+        confidence = 0.0
+    out["confidence"] = max(0.0, min(1.0, confidence))
+    out["needs_reference_scale"] = bool(result.get("needs_reference_scale", True))
+    out["warnings"] = [str(x).strip()[:600] for x in (result.get("warnings") or []) if str(x).strip()][:20]
+
+    incoming = result.get("measurements") or {}
+    if isinstance(incoming, dict) and not out["needs_reference_scale"]:
+        for key in MEASUREMENT_KEYS:
+            value = incoming.get(key)
+            if value is None:
+                continue
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                continue
+            if number > 0 and number < 100000:
+                out["measurements"][key] = number
+    elif any((incoming or {}).get(key) is not None for key in MEASUREMENT_KEYS) if isinstance(incoming, dict) else False:
+        out["warnings"].append("Image-only dimensions were withheld because no trustworthy reference scale was confirmed.")
+
+    # The user-selected category remains authoritative.
+    out["kind"] = kind
+    return out
 
 
 def analyze_hardware_image(path: Path, filename: str, kind: str = "OTHER") -> dict[str, Any]:
@@ -36,7 +90,7 @@ def analyze_hardware_image(path: Path, filename: str, kind: str = "OTHER") -> di
     measurement.
     """
     kind = (kind or "OTHER").strip().upper()
-    if kind not in {"FASTENER", "FITTING", "BEARING", "OTHER"}:
+    if kind not in VALID_KINDS:
         kind = "OTHER"
 
     key = os.getenv("OPENAI_API_KEY")
@@ -63,15 +117,8 @@ def analyze_hardware_image(path: Path, filename: str, kind: str = "OTHER") -> di
             "measurements": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["diameter_mm", "length_mm", "thread_pitch_mm", "threads_per_inch", "width_mm", "height_mm"],
-                "properties": {
-                    "diameter_mm": {"type": ["number", "null"]},
-                    "length_mm": {"type": ["number", "null"]},
-                    "thread_pitch_mm": {"type": ["number", "null"]},
-                    "threads_per_inch": {"type": ["number", "null"]},
-                    "width_mm": {"type": ["number", "null"]},
-                    "height_mm": {"type": ["number", "null"]},
-                },
+                "required": list(MEASUREMENT_KEYS),
+                "properties": {key: {"type": ["number", "null"]} for key in MEASUREMENT_KEYS},
             },
             "markings": {"type": "array", "items": {"type": "string"}},
             "candidate_matches": {
@@ -114,7 +161,4 @@ Use confidence conservatively."""
         store=False,
     )
 
-    result = json.loads(response.output_text)
-    # Keep the user's selected category authoritative when the model strays.
-    result["kind"] = kind
-    return result
+    return _normalize_result(json.loads(response.output_text), kind)
