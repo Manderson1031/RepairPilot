@@ -34,6 +34,12 @@ export type HardwareScanResult={
     confidence:number;
     fields?:string[];
   };
+  thread_measurement?:{
+    applied:boolean;
+    source:string;
+    confidence:number;
+    interval_count?:number;
+  };
   size_resolution?:{
     candidate_count:number;
     thread_confirmed:boolean;
@@ -93,6 +99,25 @@ export async function fuseHardwareDepth(options:{
       measurements:options.measurements,
       confidence:options.confidence,
       source:options.source||'arkit_lidar'
+    })
+  },options.timeoutMs??15000);
+}
+
+export async function fuseHardwareThread(options:{
+  apiBase:string;
+  token:string;
+  scan:HardwareScanResult;
+  crestPositionsPx:number[];
+  mmPerPixel:number;
+  timeoutMs?:number;
+}):Promise<HardwareScanResult>{
+  return jsonRequest<HardwareScanResult>(`${options.apiBase}/hardware/fuse-thread`,options.token,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      scan:options.scan,
+      crest_positions_px:options.crestPositionsPx,
+      mm_per_pixel:options.mmPerPixel
     })
   },options.timeoutMs??15000);
 }
