@@ -78,6 +78,15 @@ private final class RepairPilotLidarSession {
     ]
   }
 
+  private func median(_ values: [Float]) -> Float {
+    let sorted = values.sorted()
+    let middle = sorted.count / 2
+    if sorted.count % 2 == 0 {
+      return (sorted[middle - 1] + sorted[middle]) / 2.0
+    }
+    return sorted[middle]
+  }
+
   private func medianDepth(
     buffer: CVPixelBuffer,
     confidence: CVPixelBuffer?,
@@ -103,8 +112,14 @@ private final class RepairPilotLidarSession {
     let confidenceBase = confidence.flatMap(CVPixelBufferGetBaseAddress)
     let confidenceStride = confidence.map { CVPixelBufferGetBytesPerRow($0) / MemoryLayout<UInt8>.stride } ?? 0
 
-    for py in max(0, y - radius)...min(height - 1, y + radius) {
-      for px in max(0, x - radius)...min(width - 1, x + radius) {
+    let minX = max(0, x - radius)
+    let maxX = min(width - 1, x + radius)
+    let minY = max(0, y - radius)
+    let maxY = min(height - 1, y + radius)
+    let expectedSamples = max(1, (maxX - minX + 1) * (maxY - minY + 1))
+
+    for py in minY...maxY {
+      for px in minX...maxX {
         let z = values[py * stride + px]
         if z.isFinite && z > 0.02 && z < 5.0 {
           samples.append(z)
@@ -117,10 +132,20 @@ private final class RepairPilotLidarSession {
       }
     }
 
-    guard samples.count >= 3 else { throw RepairPilotLidarError.invalidDepth }
-    samples.sort()
-    let depth = samples[samples.count / 2]
-    let confidenceValue = confidenceSamples.isEmpty ? 0.5 : confidenceSamples.reduce(0, +) / Float(confidenceSamples.count)
+    guard samples.count >= 5 else { throw RepairPilotLidarError.invalidDepth }
+    let depth = median(samples)
+
+    // Penalize endpoint windows that straddle an object edge, contain depth holes,
+    // or show locally inconsistent geometry. ARKit confidence alone can still be
+    // high on mixed foreground/background samples, which is unsafe for exact sizing.
+    let deviations = samples.map { abs($0 - depth) }
+    let mad = median(deviations)
+    let relativeMad = mad / max(depth, 0.001)
+    let consistencyConfidence = max(0.0, min(1.0, 1.0 - (relativeMad / 0.025)))
+    let coverageConfidence = max(0.0, min(1.0, Float(samples.count) / Float(expectedSamples)))
+    let arkitConfidence = confidenceSamples.isEmpty ? 0.5 : confidenceSamples.reduce(0, +) / Float(confidenceSamples.count)
+    let confidenceValue = min(arkitConfidence, consistencyConfidence, coverageConfidence)
+
     return (depth, confidenceValue)
   }
 
