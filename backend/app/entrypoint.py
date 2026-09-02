@@ -4,6 +4,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from .authdb import audit
 from .hardware_depth import fuse_scan_with_depth
 from .hardware_matching import enrich_scan_with_dimensional_candidates
+from .hardware_replacement import replacement_plan
 from .main import app, bearer_scheme, limiter, user_from_credentials
 from .thread_vision import fuse_thread_measurement, measure_thread_pitch_from_crests
 
@@ -93,3 +94,33 @@ def hardware_fuse_thread(
         },
     )
     return result
+
+
+@app.post("/hardware/replacement-plan")
+@limiter.limit("30/minute")
+def hardware_replacement_plan(
+    request: Request,
+    payload: dict,
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+):
+    user = user_from_credentials(credentials)
+    scan = payload.get("scan")
+    if not isinstance(scan, dict):
+        raise HTTPException(400, "A hardware scan result is required.")
+
+    plan = replacement_plan(scan)
+    audit(
+        user["sub"],
+        "hardware.replacement_planned",
+        "hardware",
+        "",
+        {
+            "kind": plan.get("kind", "OTHER"),
+            "readiness": plan.get("readiness", "identify_only"),
+            "search_ready": bool(plan.get("search_ready")),
+            "exact_replacement_ready": bool(plan.get("exact_replacement_ready")),
+            "confidence": plan.get("confidence", 0),
+            "missing_evidence": plan.get("missing_evidence", []),
+        },
+    )
+    return plan
