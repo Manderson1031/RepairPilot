@@ -74,7 +74,13 @@ def dimensional_candidates(scan: dict[str, Any]) -> list[dict[str, Any]]:
             reason += f' Measured {pitch:.3g} mm pitch agrees with the common {coarse:g} mm pitch.'
         if length:
             designation += f' × {round(length, 1):g} mm length'
-        out.append({'name': designation, 'reason': reason, 'system': 'metric', 'thread_confirmed': exact_thread})
+        out.append({
+            'name': designation,
+            'reason': reason,
+            'system': 'metric',
+            'thread_confirmed': exact_thread,
+            'diameter_error_ratio': metric_error / metric_tolerance,
+        })
 
     diameter_in = diameter / 25.4
     sae, sae_error = _nearest(diameter_in, SAE_DIAMETERS_IN)
@@ -94,8 +100,21 @@ def dimensional_candidates(scan: dict[str, Any]) -> list[dict[str, Any]]:
                 reason += f' Measured thread spacing agrees with {nearest_tpi} TPI.'
         if length:
             designation += f' × {length / 25.4:.3g} in length'
-        out.append({'name': designation, 'reason': reason, 'system': 'inch', 'thread_confirmed': exact_thread})
+        out.append({
+            'name': designation,
+            'reason': reason,
+            'system': 'inch',
+            'thread_confirmed': exact_thread,
+            'diameter_error_ratio': sae_error / sae_tolerance,
+        })
 
+    out.sort(key=lambda item: (
+        0 if item.get('thread_confirmed') else 1,
+        float(item.get('diameter_error_ratio', 1.0)),
+        0 if item.get('system') == 'metric' else 1,
+    ))
+    for item in out:
+        item.pop('diameter_error_ratio', None)
     return out
 
 
@@ -106,11 +125,9 @@ def enrich_scan_with_dimensional_candidates(scan: dict[str, Any]) -> dict[str, A
         return result
 
     existing = list(result.get('candidate_matches') or [])
-    names = {str(item.get('name', '')).lower() for item in existing if isinstance(item, dict)}
-    for candidate in dimensional:
-        if candidate['name'].lower() not in names:
-            existing.insert(0, candidate)
-    result['candidate_matches'] = existing[:8]
+    existing_names = {str(item.get('name', '')).lower() for item in existing if isinstance(item, dict)}
+    ranked = [candidate for candidate in dimensional if candidate['name'].lower() not in existing_names]
+    result['candidate_matches'] = (ranked + existing)[:8]
     result['size_resolution'] = {
         'candidate_count': len(dimensional),
         'thread_confirmed': any(bool(x.get('thread_confirmed')) for x in dimensional),
