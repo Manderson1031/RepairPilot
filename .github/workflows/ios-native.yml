@@ -26,9 +26,11 @@ on:
       - '.github/workflows/ios-native.yml'
 
 # Native compile gate for the local ARKit/LiDAR Expo modules.
+# Expo SDK 57's ExpoModulesJSI package requires Swift tools 6.2, so use the
+# macOS 26 image whose default Xcode 26.x toolchain provides Swift 6.2+.
 jobs:
   ios-native-build:
-    runs-on: macos-15
+    runs-on: macos-26
     defaults:
       run:
         working-directory: mobile
@@ -39,6 +41,10 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: mobile/package-lock.json
+      - name: Verify Xcode and Swift toolchain
+        run: |
+          xcodebuild -version
+          xcrun swiftc --version
       - run: npm ci
       - name: Generate iOS project and autolink local Expo modules
         run: npx expo prebuild --platform ios --clean --no-install
@@ -64,6 +70,9 @@ jobs:
         run: |
           {
             echo '===== RepairPilot native build diagnostics ====='
+            echo '===== Toolchain ====='
+            xcodebuild -version || true
+            xcrun swiftc --version || true
             if [ -f /tmp/repairpilot-xcode.log ]; then
               grep -nE '(^| )(error:|fatal error:|SwiftCompile|CompileSwift|SwiftEmitModule|PhaseScriptExecution|Could not resolve package dependencies|RepairPilot(Lidar|AR)|BUILD FAILED|The following build commands failed)' /tmp/repairpilot-xcode.log | tail -n 350 || true
               echo '===== Swift package failure context ====='
