@@ -26,11 +26,11 @@ on:
       - '.github/workflows/ios-native.yml'
 
 # Native compile gate for the local ARKit/LiDAR Expo modules.
-# Expo SDK 57's ExpoModulesJSI package requires Swift tools 6.2, so use the
-# macOS 26 image whose default Xcode 26.x toolchain provides Swift 6.2+.
+# Expo SDK 57's ExpoModulesJSI package requires Swift tools 6.2. The macOS 15
+# image includes Xcode 26.3, so select it explicitly instead of the Xcode 16.4 default.
 jobs:
   ios-native-build:
-    runs-on: macos-26
+    runs-on: macos-15
     defaults:
       run:
         working-directory: mobile
@@ -41,8 +41,9 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: mobile/package-lock.json
-      - name: Verify Xcode and Swift toolchain
+      - name: Select Swift 6.2 capable Xcode
         run: |
+          sudo xcode-select -s /Applications/Xcode_26.3.app/Contents/Developer
           xcodebuild -version
           xcrun swiftc --version
       - run: npm ci
