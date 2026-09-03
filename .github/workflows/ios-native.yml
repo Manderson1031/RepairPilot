@@ -66,8 +66,12 @@ jobs:
             echo '===== RepairPilot native build diagnostics ====='
             if [ -f /tmp/repairpilot-xcode.log ]; then
               grep -nE '(^| )(error:|fatal error:|SwiftCompile|CompileSwift|SwiftEmitModule|PhaseScriptExecution|Could not resolve package dependencies|RepairPilot(Lidar|AR)|BUILD FAILED|The following build commands failed)' /tmp/repairpilot-xcode.log | tail -n 350 || true
-              echo '===== Last 160 build lines ====='
-              tail -n 160 /tmp/repairpilot-xcode.log || true
+              echo '===== Swift package failure context ====='
+              grep -n -B 30 -A 50 'Could not resolve package dependencies' /tmp/repairpilot-xcode.log | tail -n 120 || true
+              echo '===== ExpoModulesJSI failure context ====='
+              grep -n -B 30 -A 50 'ExpoModulesJSI' /tmp/repairpilot-xcode.log | tail -n 160 || true
+              echo '===== Last 200 build lines ====='
+              tail -n 200 /tmp/repairpilot-xcode.log || true
             else
               echo 'xcodebuild log was not created.'
             fi
