@@ -5,6 +5,10 @@ on:
   push:
     paths:
       - 'mobile/modules/**'
+      - 'mobile/app/ar-assist.tsx'
+      - 'mobile/app/lidar-measure.tsx'
+      - 'mobile/src/arAssist.ts'
+      - 'mobile/src/lidarScanner.ts'
       - 'mobile/app.json'
       - 'mobile/package.json'
       - 'mobile/package-lock.json'
@@ -12,6 +16,10 @@ on:
   pull_request:
     paths:
       - 'mobile/modules/**'
+      - 'mobile/app/ar-assist.tsx'
+      - 'mobile/app/lidar-measure.tsx'
+      - 'mobile/src/arAssist.ts'
+      - 'mobile/src/lidarScanner.ts'
       - 'mobile/app.json'
       - 'mobile/package.json'
       - 'mobile/package-lock.json'
