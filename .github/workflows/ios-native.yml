@@ -54,6 +54,9 @@ jobs:
             -configuration Debug \
             -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=YES \
+            EXCLUDED_ARCHS=x86_64 \
             CODE_SIGNING_ALLOWED=NO \
             build 2>&1 | tee /tmp/repairpilot-xcode.log
       - name: Capture native build diagnostics
@@ -62,9 +65,9 @@ jobs:
           {
             echo '===== RepairPilot native build diagnostics ====='
             if [ -f /tmp/repairpilot-xcode.log ]; then
-              grep -nE '(^| )(error:|fatal error:|SwiftCompile|CompileSwift|RepairPilot(Lidar|AR)|BUILD FAILED|The following build commands failed)' /tmp/repairpilot-xcode.log | tail -n 250 || true
-              echo '===== Last 120 build lines ====='
-              tail -n 120 /tmp/repairpilot-xcode.log || true
+              grep -nE '(^| )(error:|fatal error:|SwiftCompile|CompileSwift|SwiftEmitModule|PhaseScriptExecution|Could not resolve package dependencies|RepairPilot(Lidar|AR)|BUILD FAILED|The following build commands failed)' /tmp/repairpilot-xcode.log | tail -n 350 || true
+              echo '===== Last 160 build lines ====='
+              tail -n 160 /tmp/repairpilot-xcode.log || true
             else
               echo 'xcodebuild log was not created.'
             fi
