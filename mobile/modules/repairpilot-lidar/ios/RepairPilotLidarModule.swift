@@ -144,7 +144,7 @@ private final class RepairPilotLidarSession {
     let consistencyConfidence = max(0.0, min(1.0, 1.0 - (relativeMad / 0.025)))
     let coverageConfidence = max(0.0, min(1.0, Float(samples.count) / Float(expectedSamples)))
     let arkitConfidence = confidenceSamples.isEmpty ? 0.5 : confidenceSamples.reduce(0, +) / Float(confidenceSamples.count)
-    let confidenceValue = min(arkitConfidence, consistencyConfidence, coverageConfidence)
+    let confidenceValue = min(arkitConfidence, min(consistencyConfidence, coverageConfidence))
 
     return (depth, confidenceValue)
   }
