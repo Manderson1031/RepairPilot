@@ -25,6 +25,7 @@ on:
       - 'mobile/package-lock.json'
       - '.github/workflows/ios-native.yml'
 
+# Native compile gate for the local ARKit/LiDAR Expo modules.
 jobs:
   ios-native-build:
     runs-on: macos-15
