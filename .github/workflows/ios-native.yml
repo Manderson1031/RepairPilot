@@ -1,6 +1,7 @@
 name: RepairPilot iOS Native
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - 'mobile/modules/**'
