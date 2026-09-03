@@ -45,6 +45,7 @@ jobs:
       - name: Install CocoaPods dependencies
         run: npx pod-install ios
       - name: Build iOS simulator app
+        id: xcodebuild
         run: |
           set -o pipefail
           xcodebuild \
@@ -54,4 +55,15 @@ jobs:
             -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO \
-            build
+            build 2>&1 | tee /tmp/repairpilot-xcode.log
+      - name: Print native build errors
+        if: failure()
+        run: |
+          echo '===== RepairPilot native build diagnostics ====='
+          if [ -f /tmp/repairpilot-xcode.log ]; then
+            grep -nE '(^| )(error:|fatal error:|SwiftCompile|CompileSwift|RepairPilot(Lidar|AR)|BUILD FAILED|The following build commands failed)' /tmp/repairpilot-xcode.log | tail -n 250 || true
+            echo '===== Last 120 build lines ====='
+            tail -n 120 /tmp/repairpilot-xcode.log || true
+          else
+            echo 'xcodebuild log was not created.'
+          fi
