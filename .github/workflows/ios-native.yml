@@ -56,14 +56,24 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO \
             build 2>&1 | tee /tmp/repairpilot-xcode.log
-      - name: Print native build errors
+      - name: Capture native build diagnostics
         if: failure()
         run: |
-          echo '===== RepairPilot native build diagnostics ====='
-          if [ -f /tmp/repairpilot-xcode.log ]; then
-            grep -nE '(^| )(error:|fatal error:|SwiftCompile|CompileSwift|RepairPilot(Lidar|AR)|BUILD FAILED|The following build commands failed)' /tmp/repairpilot-xcode.log | tail -n 250 || true
-            echo '===== Last 120 build lines ====='
-            tail -n 120 /tmp/repairpilot-xcode.log || true
-          else
-            echo 'xcodebuild log was not created.'
-          fi
+          {
+            echo '===== RepairPilot native build diagnostics ====='
+            if [ -f /tmp/repairpilot-xcode.log ]; then
+              grep -nE '(^| )(error:|fatal error:|SwiftCompile|CompileSwift|RepairPilot(Lidar|AR)|BUILD FAILED|The following build commands failed)' /tmp/repairpilot-xcode.log | tail -n 250 || true
+              echo '===== Last 120 build lines ====='
+              tail -n 120 /tmp/repairpilot-xcode.log || true
+            else
+              echo 'xcodebuild log was not created.'
+            fi
+          } | tee native-build-errors.txt
+      - name: Upload native build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repairpilot-native-build-errors
+          path: mobile/native-build-errors.txt
+          if-no-files-found: error
+          retention-days: 3
