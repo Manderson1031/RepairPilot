@@ -1,5 +1,5 @@
 import React,{useEffect,useState} from 'react';
-import {ActivityIndicator,Alert,Image,ImageBackground,Pressable,SafeAreaView,ScrollView,StyleSheet,Text,TextInput,TouchableOpacity,View} from 'react-native';
+import {ActivityIndicator,Alert,Image,ImageBackground,Platform,Pressable,SafeAreaView,ScrollView,StyleSheet,Text,TextInput,TouchableOpacity,View} from 'react-native';
 import {StatusBar} from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
 import * as SecureStore from 'expo-secure-store';
@@ -13,106 +13,31 @@ const TOKEN_KEY='repairpilot.auth.token';
 const PENDING_SCAN_KEY='repairpilot.hardware.pendingScan';
 const FRAME_WIDTH=360;
 const FRAME_HEIGHT=280;
-
 type Point={x:number;y:number};
 
 export default function ThreadMeasureRoute(){
-  const [scan,setScan]=useState<HardwareScanResult|null>(null);
-  const [photo,setPhoto]=useState<any>(null);
-  const [referenceMM,setReferenceMM]=useState('');
-  const [referencePoints,setReferencePoints]=useState<Point[]>([]);
-  const [crestPoints,setCrestPoints]=useState<Point[]>([]);
-  const [mode,setMode]=useState<'reference'|'crests'>('reference');
-  const [busy,setBusy]=useState(false);
-
-  useEffect(()=>{AsyncStorage.getItem(PENDING_SCAN_KEY).then(raw=>{if(raw)setScan(JSON.parse(raw))}).catch(()=>{})},[]);
-
-  const capture=async()=>{
-    try{
-      const permission=await ImagePicker.requestCameraPermissionsAsync();
-      if(!permission.granted)return Alert.alert('Thread Scanner','Camera permission is required.');
-      const picked=await ImagePicker.launchCameraAsync({quality:1,mediaTypes:['images']});
-      if(picked.canceled)return;
-      setPhoto(picked.assets[0]);setReferencePoints([]);setCrestPoints([]);setMode('reference');
-    }catch(e:any){Alert.alert('Thread Scanner',e?.message||'Could not capture the close-up photo.')}
-  };
-
-  const choosePhoto=async()=>{
-    try{
-      const picked=await ImagePicker.launchImageLibraryAsync({quality:1,mediaTypes:['images'],allowsMultipleSelection:false});
-      if(picked.canceled)return;
-      setPhoto(picked.assets[0]);setReferencePoints([]);setCrestPoints([]);setMode('reference');
-    }catch(e:any){Alert.alert('Thread Scanner',e?.message||'Could not open the close-up photo.')}
-  };
-
-  const tapImage=(event:any)=>{
-    if(!photo||busy)return;
-    const point={
-      x:Math.max(0,Math.min(FRAME_WIDTH,event.nativeEvent.locationX)),
-      y:Math.max(0,Math.min(FRAME_HEIGHT,event.nativeEvent.locationY))
-    };
-    if(mode==='reference'){
-      const next=referencePoints.length>=2?[point]:[...referencePoints,point];
-      setReferencePoints(next);
-      if(next.length===2)setMode('crests');
-    }else{
-      setCrestPoints([...crestPoints,point]);
-    }
-  };
-
-  const mmPerPixel=()=>{
-    const mm=Number(referenceMM);
-    if(!Number.isFinite(mm)||mm<=0||referencePoints.length!==2)return null;
-    const dx=referencePoints[1].x-referencePoints[0].x;
-    const dy=referencePoints[1].y-referencePoints[0].y;
-    const pixels=Math.sqrt(dx*dx+dy*dy);
-    return pixels>0?mm/pixels:null;
-  };
-
-  const apply=async()=>{
-    if(!scan)return Alert.alert('Thread Scanner','Return to Hardware Scanner and identify the fastener first.');
-    if(scan.kind!=='FASTENER')return Alert.alert('Thread Scanner','Close-up thread measurement is currently enabled for fasteners.');
-    const scale=mmPerPixel();
-    if(!scale)return Alert.alert('Thread Scanner','Enter the exact reference length and tap both ends of that reference in the same image plane.');
-    if(crestPoints.length<5)return Alert.alert('Thread Scanner','Mark at least five consecutive thread crests. More crests improve reliability.');
-    const token=await SecureStore.getItemAsync(TOKEN_KEY);
-    if(!token)return Alert.alert('Thread Scanner','Please sign in first.');
-    setBusy(true);
-    try{
-      const fused=await fuseHardwareThread({
-        apiBase:API,
-        token,
-        scan,
-        crestPositionsPx:crestPoints.map(p=>p.x),
-        mmPerPixel:scale
-      });
-      await AsyncStorage.setItem(PENDING_SCAN_KEY,JSON.stringify(fused));
-      if(fused.thread_measurement?.applied){
-        Alert.alert('Thread Measured',`Pitch ${fused.measurements.thread_pitch_mm} mm • ${fused.measurements.threads_per_inch} TPI`,[{text:'DONE',onPress:()=>router.back()}]);
-      }else{
-        Alert.alert('Thread Measurement','The crest spacing was not consistent enough to apply exact pitch/TPI. Recapture closer, keep the thread axis horizontal, and mark consecutive crests.');
-      }
-    }catch(e:any){Alert.alert('Thread Scanner',e?.message||'Could not apply the thread measurement.')}finally{setBusy(false)}
-  };
-
-  const reset=()=>{setReferencePoints([]);setCrestPoints([]);setMode('reference')};
-  const scale=mmPerPixel();
-
-  return <SafeAreaView style={s.safe}><StatusBar style="light"/><ImageBackground source={require('../assets/industrial-bg-v34.png')} style={s.bg} resizeMode="cover" imageStyle={{opacity:.82}}>
-    <View style={s.top}><TouchableOpacity style={s.hit} onPress={()=>router.back()}><MaterialCommunityIcons name="chevron-left" size={30} color="#f4f4f0"/></TouchableOpacity><Text style={s.title}>THREAD MEASUREMENT</Text><View style={s.hit}/></View>
-    <ScrollView contentContainerStyle={s.wrap}>
-      <View style={s.instructions}><Text style={s.kicker}>CLOSE-UP RGB + CALIBRATED SCALE</Text><Text style={s.body}>Photograph the threads straight-on with the thread axis running left-to-right. Include a known reference in the same plane. First mark both ends of the reference, then mark at least five consecutive thread crests.</Text></View>
-      <View style={s.referenceRow}><TextInput value={referenceMM} onChangeText={setReferenceMM} keyboardType="decimal-pad" placeholder="Known reference length" placeholderTextColor="#777" style={s.input}/><Text style={s.unit}>mm</Text></View>
-      <View style={s.modeRow}><View style={[s.modePill,mode==='reference'&&s.modeActive]}><Text style={s.modeText}>1  REFERENCE {referencePoints.length}/2</Text></View><View style={[s.modePill,mode==='crests'&&s.modeActive]}><Text style={s.modeText}>2  CRESTS {crestPoints.length}</Text></View></View>
-      <View style={s.frame}>{photo?<Pressable onPress={tapImage} style={s.press}><Image source={{uri:photo.uri}} style={s.photo} resizeMode="stretch"/>{referencePoints.map((p,i)=><View key={`r${i}`} pointerEvents="none" style={[s.refMarker,{left:p.x-10,top:p.y-10}]}><Text style={s.markerText}>R{i+1}</Text></View>)}{crestPoints.map((p,i)=><View key={`c${i}`} pointerEvents="none" style={[s.crestMarker,{left:p.x-8,top:p.y-8}]}><Text style={s.crestText}>{i+1}</Text></View>)}</Pressable>:<View style={s.empty}><MaterialCommunityIcons name="screw-flat-top" size={60} color="#ffb000"/><Text style={s.emptyTitle}>CAPTURE THREAD CLOSE-UP</Text><Text style={s.emptyBody}>Use good light and fill the frame with the threaded section.</Text></View>}</View>
-      {scale?<View style={s.calibrated}><MaterialCommunityIcons name="check-decagram" size={19} color="#9fe593"/><Text style={s.calibratedText}>CALIBRATED • {(scale).toFixed(5)} mm/pixel</Text></View>:null}
-      <View style={s.actions}><TouchableOpacity disabled={busy} style={s.primary} onPress={capture}><MaterialCommunityIcons name="camera-outline" size={21} color="#111"/><Text style={s.primaryText}>TAKE CLOSE-UP</Text></TouchableOpacity><TouchableOpacity disabled={busy} style={s.secondary} onPress={choosePhoto}><MaterialCommunityIcons name="image-outline" size={20} color="#ffb000"/><Text style={s.secondaryText}>PHOTO</Text></TouchableOpacity></View>
-      {photo?<View style={s.actions}><TouchableOpacity disabled={busy} style={s.secondaryWide} onPress={reset}><Text style={s.secondaryText}>RESET POINTS</Text></TouchableOpacity><TouchableOpacity disabled={busy||crestPoints.length<5||!scale} style={[s.apply,(busy||crestPoints.length<5||!scale)&&s.disabled]} onPress={apply}>{busy?<ActivityIndicator color="#111"/>:<MaterialCommunityIcons name="ruler-square" size={21} color="#111"/>}<Text style={s.applyText}>MEASURE PITCH / TPI</Text></TouchableOpacity></View>:null}
-      <Text style={s.note}>RepairPilot uses the median spacing across repeated crests and rejects inconsistent spacing. It will not confirm an exact pitch or TPI from a single visible thread or from an uncalibrated image.</Text>
-    </ScrollView>
-  </ImageBackground></SafeAreaView>;
+ const [scan,setScan]=useState<HardwareScanResult|null>(null),[photo,setPhoto]=useState<any>(null),[referenceMM,setReferenceMM]=useState(''),[referencePoints,setReferencePoints]=useState<Point[]>([]),[crestPoints,setCrestPoints]=useState<Point[]>([]),[mode,setMode]=useState<'reference'|'crests'>('reference'),[busy,setBusy]=useState(false);
+ useEffect(()=>{AsyncStorage.getItem(PENDING_SCAN_KEY).then(raw=>{if(raw)setScan(JSON.parse(raw))}).catch(()=>{})},[]);
+ const capture=async()=>{try{const permission=await ImagePicker.requestCameraPermissionsAsync();if(!permission.granted)return Alert.alert('Thread Scanner','Camera permission is required.');const picked=await ImagePicker.launchCameraAsync({quality:1,mediaTypes:['images']});if(picked.canceled)return;setPhoto(picked.assets[0]);setReferencePoints([]);setCrestPoints([]);setMode('reference')}catch(e:any){Alert.alert('Thread Scanner',e?.message||'Could not capture the close-up photo.')}};
+ const choosePhoto=async()=>{try{const picked=await ImagePicker.launchImageLibraryAsync({quality:1,mediaTypes:['images'],allowsMultipleSelection:false});if(picked.canceled)return;setPhoto(picked.assets[0]);setReferencePoints([]);setCrestPoints([]);setMode('reference')}catch(e:any){Alert.alert('Thread Scanner',e?.message||'Could not open the close-up photo.')}};
+ const tapImage=(event:any)=>{if(!photo||busy)return;const point={x:Math.max(0,Math.min(FRAME_WIDTH,event.nativeEvent.locationX)),y:Math.max(0,Math.min(FRAME_HEIGHT,event.nativeEvent.locationY))};if(mode==='reference'){const next=referencePoints.length>=2?[point]:[...referencePoints,point];setReferencePoints(next);if(next.length===2)setMode('crests')}else setCrestPoints([...crestPoints,point])};
+ const mmPerPixel=()=>{const mm=Number(referenceMM);if(!Number.isFinite(mm)||mm<=0||referencePoints.length!==2)return null;const dx=referencePoints[1].x-referencePoints[0].x,dy=referencePoints[1].y-referencePoints[0].y,pixels=Math.sqrt(dx*dx+dy*dy);return pixels>0?mm/pixels:null};
+ const apply=async()=>{if(!scan)return Alert.alert('Thread Scanner','Return to Hardware Scanner and identify the fastener first.');if(scan.kind!=='FASTENER')return Alert.alert('Thread Scanner','Close-up thread measurement is currently enabled for fasteners.');const scale=mmPerPixel();if(!scale)return Alert.alert('Thread Scanner','Enter the exact reference length and tap both ends of that reference in the same image plane.');if(crestPoints.length<5)return Alert.alert('Thread Scanner','Mark at least five consecutive thread crests.');const token=await SecureStore.getItemAsync(TOKEN_KEY);if(!token)return Alert.alert('Thread Scanner','Please sign in first.');setBusy(true);try{const fused=await fuseHardwareThread({apiBase:API,token,scan,crestPositionsPx:crestPoints.map(p=>p.x),mmPerPixel:scale});await AsyncStorage.setItem(PENDING_SCAN_KEY,JSON.stringify(fused));if(fused.thread_measurement?.applied)Alert.alert('Thread Measured',`Pitch ${fused.measurements.thread_pitch_mm} mm • ${fused.measurements.threads_per_inch} TPI`,[{text:'DONE',onPress:()=>router.back()}]);else Alert.alert('Thread Measurement','The crest spacing was not consistent enough to apply exact pitch/TPI.')}catch(e:any){Alert.alert('Thread Scanner',e?.message||'Could not apply the thread measurement.')}finally{setBusy(false)}};
+ const reset=()=>{setReferencePoints([]);setCrestPoints([]);setMode('reference')};
+ const scale=mmPerPixel();
+ return <SafeAreaView style={s.safe}><StatusBar style="light"/><ImageBackground source={require('../assets/industrial-bg-v34.png')} style={s.bg} resizeMode="cover" imageStyle={s.bgImage}><View style={s.shade}/>
+  <View style={s.top}><TouchableOpacity style={s.hit} onPress={()=>router.back()}><MaterialCommunityIcons name="chevron-left" size={27} color="#f4f4f0"/></TouchableOpacity><Text style={s.title}>THREAD MEASUREMENT</Text><TouchableOpacity style={s.hit}><MaterialCommunityIcons name="information-outline" size={20} color="#f4f4f0"/></TouchableOpacity></View>
+  <ScrollView contentContainerStyle={s.wrap}>
+   <View style={s.instructions}><Text style={s.kicker}>CLOSE-UP RGB + CALIBRATED SCALE</Text><Text style={s.body}>Keep the thread axis left-to-right. Mark both ends of a known reference, then mark at least five consecutive thread crests.</Text></View>
+   <View style={s.referenceRow}><TextInput value={referenceMM} onChangeText={setReferenceMM} keyboardType="decimal-pad" placeholder="Known reference length" placeholderTextColor="#777" style={s.input}/><Text style={s.unit}>mm</Text></View>
+   <View style={s.modeRow}><View style={[s.modePill,mode==='reference'&&s.modeActive]}><Text style={s.modeText}>1  REFERENCE {referencePoints.length}/2</Text></View><View style={[s.modePill,mode==='crests'&&s.modeActive]}><Text style={s.modeText}>2  CRESTS {crestPoints.length}</Text></View></View>
+   <View style={s.frame}>{photo?<Pressable onPress={tapImage} style={s.press}><Image source={{uri:photo.uri}} style={s.photo} resizeMode="stretch"/>{referencePoints.map((p,i)=><View key={`r${i}`} pointerEvents="none" style={[s.refMarker,{left:p.x-10,top:p.y-10}]}><Text style={s.markerText}>R{i+1}</Text></View>)}{crestPoints.map((p,i)=><View key={`c${i}`} pointerEvents="none" style={[s.crestMarker,{left:p.x-8,top:p.y-8}]}><Text style={s.crestText}>{i+1}</Text></View>)}</Pressable>:<View style={s.empty}><MaterialCommunityIcons name="screw-flat-top" size={50} color="#ffb000"/><Text style={s.emptyTitle}>CAPTURE THREAD CLOSE-UP</Text><Text style={s.emptyBody}>Use good light and fill the frame with the threaded section.</Text></View>}</View>
+   {scale?<View style={s.calibrated}><MaterialCommunityIcons name="check-decagram" size={17} color="#9fe593"/><Text style={s.calibratedText}>CALIBRATED • {scale.toFixed(5)} mm/pixel</Text></View>:null}
+   <View style={s.actions}><TouchableOpacity disabled={busy} style={s.primary} onPress={capture}><MaterialCommunityIcons name="camera-outline" size={19} color="#111"/><Text style={s.primaryText}>TAKE CLOSE-UP</Text></TouchableOpacity><TouchableOpacity disabled={busy} style={s.secondary} onPress={choosePhoto}><MaterialCommunityIcons name="image-outline" size={18} color="#ffb000"/><Text style={s.secondaryText}>PHOTO</Text></TouchableOpacity></View>
+   {photo?<View style={s.actions}><TouchableOpacity disabled={busy} style={s.secondaryWide} onPress={reset}><Text style={s.secondaryText}>RESET POINTS</Text></TouchableOpacity><TouchableOpacity disabled={busy||crestPoints.length<5||!scale} style={[s.apply,(busy||crestPoints.length<5||!scale)&&s.disabled]} onPress={apply}>{busy?<ActivityIndicator color="#111"/>:<MaterialCommunityIcons name="ruler-square" size={19} color="#111"/>}<Text style={s.applyText}>MEASURE PITCH / TPI</Text></TouchableOpacity></View>:null}
+  </ScrollView>
+ </ImageBackground></SafeAreaView>;
 }
 
-const s=StyleSheet.create({
- safe:{flex:1,backgroundColor:'#090b0d'},bg:{flex:1},top:{height:58,flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingHorizontal:10,backgroundColor:'rgba(8,10,11,.9)',borderBottomWidth:1,borderBottomColor:'rgba(255,179,0,.44)'},hit:{width:44,height:44,alignItems:'center',justifyContent:'center'},title:{color:'#f4f4f0',fontSize:17,fontWeight:'900',letterSpacing:.8},wrap:{padding:14,paddingBottom:50,alignItems:'center'},instructions:{width:'100%',borderWidth:1,borderColor:'#4d5355',backgroundColor:'rgba(14,17,18,.96)',padding:11},kicker:{color:'#ffb000',fontSize:10,fontWeight:'900',letterSpacing:.8},body:{color:'#c4c8c9',fontSize:11,lineHeight:17,marginTop:5},referenceRow:{width:'100%',flexDirection:'row',alignItems:'center',marginTop:10,borderWidth:1,borderColor:'#686e70',backgroundColor:'rgba(15,17,18,.97)'},input:{flex:1,color:'#fff',paddingHorizontal:12,paddingVertical:11,fontWeight:'800'},unit:{color:'#ffb000',fontWeight:'900',paddingRight:12},modeRow:{width:'100%',flexDirection:'row',gap:7,marginTop:8},modePill:{flex:1,borderWidth:1,borderColor:'#4f5557',padding:8,backgroundColor:'rgba(22,24,25,.95)'},modeActive:{borderColor:'#ffb000',backgroundColor:'rgba(80,59,11,.92)'},modeText:{color:'#ddd',fontWeight:'900',fontSize:9,textAlign:'center'},frame:{width:FRAME_WIDTH,height:FRAME_HEIGHT,marginTop:10,borderWidth:2,borderColor:'#ffb000',backgroundColor:'#080a0b',overflow:'hidden'},press:{width:FRAME_WIDTH,height:FRAME_HEIGHT},photo:{width:FRAME_WIDTH,height:FRAME_HEIGHT},empty:{flex:1,alignItems:'center',justifyContent:'center',padding:24},emptyTitle:{color:'#fff',fontWeight:'900',marginTop:8},emptyBody:{color:'#aeb2b4',fontSize:11,textAlign:'center',marginTop:5},refMarker:{position:'absolute',width:20,height:20,borderRadius:10,backgroundColor:'#70d7ff',borderWidth:2,borderColor:'#071116',alignItems:'center',justifyContent:'center'},markerText:{color:'#061015',fontSize:7,fontWeight:'900'},crestMarker:{position:'absolute',width:16,height:16,borderRadius:8,backgroundColor:'#ffb000',borderWidth:2,borderColor:'#111',alignItems:'center',justifyContent:'center'},crestText:{color:'#111',fontSize:7,fontWeight:'900'},calibrated:{width:'100%',flexDirection:'row',gap:7,alignItems:'center',marginTop:8,borderWidth:1,borderColor:'#41683d',backgroundColor:'rgba(22,48,22,.84)',padding:8},calibratedText:{color:'#bceab5',fontWeight:'900',fontSize:10},actions:{width:'100%',flexDirection:'row',gap:8,marginTop:9},primary:{flex:1,minHeight:50,backgroundColor:'#ffb000',flexDirection:'row',gap:6,alignItems:'center',justifyContent:'center'},primaryText:{color:'#111',fontWeight:'900',fontSize:10},secondary:{width:105,minHeight:50,borderWidth:1,borderColor:'#ffb000',backgroundColor:'rgba(20,22,23,.97)',flexDirection:'row',gap:5,alignItems:'center',justifyContent:'center'},secondaryWide:{width:112,minHeight:50,borderWidth:1,borderColor:'#ffb000',backgroundColor:'rgba(20,22,23,.97)',alignItems:'center',justifyContent:'center'},secondaryText:{color:'#ffd36b',fontWeight:'900',fontSize:10},apply:{flex:1,minHeight:50,backgroundColor:'#ffb000',flexDirection:'row',gap:6,alignItems:'center',justifyContent:'center'},applyText:{color:'#111',fontWeight:'900',fontSize:10},disabled:{opacity:.4},note:{width:'100%',color:'#9fa5a7',fontSize:10,lineHeight:15,marginTop:10}
-});
+const condensed=Platform.select({ios:'AvenirNextCondensed-DemiBold',android:'sans-serif-condensed'});const heavy=Platform.select({ios:'AvenirNextCondensed-Heavy',android:'sans-serif-condensed'});
+const s=StyleSheet.create({safe:{flex:1,backgroundColor:'#060809'},bg:{flex:1},bgImage:{opacity:.62},shade:{...StyleSheet.absoluteFill,backgroundColor:'rgba(0,0,0,.34)'},top:{height:48,flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingHorizontal:8,backgroundColor:'rgba(5,7,8,.88)',borderBottomWidth:1,borderBottomColor:'rgba(255,176,0,.68)'},hit:{width:38,height:38,alignItems:'center',justifyContent:'center'},title:{color:'#f4f4f0',fontFamily:heavy,fontSize:17,fontWeight:'900',letterSpacing:.4},wrap:{paddingHorizontal:13,paddingTop:9,paddingBottom:34,alignItems:'center'},instructions:{width:'100%',borderWidth:1,borderColor:'#4d5355',backgroundColor:'rgba(10,12,13,.80)',padding:9},kicker:{color:'#ffb000',fontFamily:heavy,fontSize:9,fontWeight:'900',letterSpacing:.8},body:{color:'#c4c8c9',fontFamily:condensed,fontSize:10,lineHeight:15,marginTop:3},referenceRow:{width:'100%',flexDirection:'row',alignItems:'center',marginTop:8,borderWidth:1,borderColor:'#686e70',backgroundColor:'rgba(12,14,15,.84)'},input:{flex:1,color:'#fff',paddingHorizontal:10,paddingVertical:9,fontFamily:condensed,fontWeight:'800'},unit:{color:'#ffb000',fontFamily:heavy,fontWeight:'900',paddingRight:10},modeRow:{width:'100%',flexDirection:'row',gap:5,marginTop:7},modePill:{flex:1,borderWidth:1,borderColor:'#4f5557',padding:7,backgroundColor:'rgba(14,16,17,.84)'},modeActive:{borderColor:'#ffb000',backgroundColor:'rgba(80,59,11,.80)'},modeText:{color:'#ddd',fontFamily:heavy,fontWeight:'900',fontSize:8,textAlign:'center'},frame:{width:FRAME_WIDTH,height:FRAME_HEIGHT,marginTop:8,borderWidth:1.5,borderColor:'#ffb000',backgroundColor:'#080a0b',overflow:'hidden'},press:{width:FRAME_WIDTH,height:FRAME_HEIGHT},photo:{width:FRAME_WIDTH,height:FRAME_HEIGHT},empty:{flex:1,alignItems:'center',justifyContent:'center',padding:20},emptyTitle:{color:'#fff',fontFamily:heavy,fontWeight:'900',fontSize:14,marginTop:5},emptyBody:{color:'#aeb2b4',fontFamily:condensed,fontSize:9,textAlign:'center',marginTop:3},refMarker:{position:'absolute',width:20,height:20,borderRadius:10,backgroundColor:'#70d7ff',borderWidth:2,borderColor:'#071116',alignItems:'center',justifyContent:'center'},markerText:{color:'#061015',fontSize:7,fontWeight:'900'},crestMarker:{position:'absolute',width:16,height:16,borderRadius:8,backgroundColor:'#ffb000',borderWidth:2,borderColor:'#111',alignItems:'center',justifyContent:'center'},crestText:{color:'#111',fontSize:7,fontWeight:'900'},calibrated:{width:'100%',flexDirection:'row',gap:6,alignItems:'center',marginTop:7,borderWidth:1,borderColor:'#41683d',backgroundColor:'rgba(18,43,18,.82)',padding:7},calibratedText:{color:'#bceab5',fontFamily:heavy,fontWeight:'900',fontSize:9},actions:{width:'100%',flexDirection:'row',gap:7,marginTop:8},primary:{flex:1,minHeight:44,backgroundColor:'#ffb000',flexDirection:'row',gap:6,alignItems:'center',justifyContent:'center'},primaryText:{color:'#111',fontFamily:heavy,fontWeight:'900',fontSize:9},secondary:{width:90,minHeight:44,borderWidth:1,borderColor:'#ffb000',backgroundColor:'rgba(14,16,17,.88)',flexDirection:'row',gap:5,alignItems:'center',justifyContent:'center'},secondaryWide:{width:100,minHeight:44,borderWidth:1,borderColor:'#ffb000',backgroundColor:'rgba(14,16,17,.88)',alignItems:'center',justifyContent:'center'},secondaryText:{color:'#ffd36b',fontFamily:heavy,fontWeight:'900',fontSize:9},apply:{flex:1,minHeight:44,backgroundColor:'#ffb000',flexDirection:'row',gap:6,alignItems:'center',justifyContent:'center'},applyText:{color:'#111',fontFamily:heavy,fontWeight:'900',fontSize:9},disabled:{opacity:.4}});
