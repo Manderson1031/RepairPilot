@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
+      - 'mobile/app/**'
       - 'mobile/assets/**'
       - '.github/workflows/ios-device-preview.yml'
 
