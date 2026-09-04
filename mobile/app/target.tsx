@@ -1,6 +1,7 @@
 import React,{useMemo,useState} from 'react';
-import {Image,Pressable,ScrollView,StyleSheet,Text,TextInput,TouchableOpacity,useWindowDimensions,View} from 'react-native';
+import {Image,Pressable,StyleSheet,Text,TextInput,TouchableOpacity,useWindowDimensions,View} from 'react-native';
 import {StatusBar} from 'expo-status-bar';
+import {router} from 'expo-router';
 
 const MASTER=require('../assets/repairpilot-v27-design-master.png');
 const MASTER_W=1536, MASTER_H=1024;
@@ -27,8 +28,7 @@ const NAV:Array<[Screen,number,number,number,number]>=[
 
 function CropLayer({screen,width}:{screen:Screen,width:number}){
  const c=CROPS[screen];
- const ratio=c.mode==='phone'?c.w/c.h:c.w/c.h;
- const height=width/ratio;
+ const height=width/(c.w/c.h);
  const scale=Math.max(width/c.w,height/c.h);
  return <View style={[s.crop,{width,height}]}>
   <Image source={MASTER} resizeMode="stretch" style={{position:'absolute',left:-c.x*scale,top:-c.y*scale,width:MASTER_W*scale,height:MASTER_H*scale}}/>
@@ -46,12 +46,16 @@ export default function TargetApp(){
  const [password,setPassword]=useState('');
  const [selectedSymptom,setSelectedSymptom]=useState(0);
  const phoneW=Math.min(vw,Math.round(vh*0.493));
- const phoneH=phoneW/0.493;
  const c=CROPS[screen];
  const displayW=c.mode==='phone'?phoneW:Math.min(vw-16,720);
  const displayH=displayW/(c.w/c.h);
  const go=(to:Screen)=>setScreen(to);
  const showNav=c.mode==='phone'&&screen!=='login';
+ const openNativeScanner=()=>router.push('/hardware-scanner');
+ const openNativeAR=()=>router.push('/ar-assist');
+ const openReplacementMatch=()=>router.push('/replacement-match');
+ const openThreadMeasure=()=>router.push('/thread-measure');
+ const openLidarMeasure=()=>router.push('/lidar-measure');
 
  const screenHotspots=useMemo(()=>{
   if(screen==='login')return <>
@@ -60,8 +64,8 @@ export default function TargetApp(){
   </>;
   if(screen==='dashboard')return <>
    <Hotspot x={0.06} y={0.31} w={0.27} h={0.18} label="AI diagnosis" onPress={()=>go('diagnosis')}/>
-   <Hotspot x={0.36} y={0.31} w={0.27} h={0.18} label="Hardware scanner" onPress={()=>go('scanner')}/>
-   <Hotspot x={0.66} y={0.31} w={0.27} h={0.18} label="AR repair assistant" onPress={()=>go('ar')}/>
+   <Hotspot x={0.36} y={0.31} w={0.27} h={0.18} label="Hardware scanner" onPress={openNativeScanner}/>
+   <Hotspot x={0.66} y={0.31} w={0.27} h={0.18} label="AR repair assistant" onPress={openNativeAR}/>
    <Hotspot x={0.06} y={0.50} w={0.27} h={0.18} label="My equipment" onPress={()=>go('equipment')}/>
    <Hotspot x={0.36} y={0.50} w={0.27} h={0.18} label="My diagnostics" onPress={()=>go('history')}/>
    <Hotspot x={0.66} y={0.50} w={0.27} h={0.18} label="Maintenance" onPress={()=>go('maintenance')}/>
@@ -71,14 +75,19 @@ export default function TargetApp(){
    <Hotspot x={0.04} y={0.29} w={0.92} h={0.10} label="John Deere 544K" onPress={()=>go('diagnosis')}/>
   </>;
   if(screen==='diagnosis')return <>
-   {[0,1,2,3,4,5].map(i=><Pressable key={i} onPress={()=>setSelectedSymptom(i)} style={{position:'absolute',left:'6%',top:`${(31+i*7.2)}%`,width:'88%',height:'6.5%',borderWidth:selectedSymptom===i?1:0,borderColor:'#ffad00',borderRadius:4}}/>)}
+   {[0,1,2,3,4,5].map(i=><Pressable key={i} onPress={()=>setSelectedSymptom(i)} style={{position:'absolute',left:'6%',top:`${31+i*7.2}%`,width:'88%',height:'6.5%',borderWidth:selectedSymptom===i?1:0,borderColor:'#ffad00',borderRadius:4}}/>)}
    <Hotspot x={0.52} y={0.80} w={0.41} h={0.07} label="Next" onPress={()=>go('scanner')}/>
   </>;
   if(screen==='scanner')return <>
-   <Hotspot x={0.36} y={0.72} w={0.28} h={0.11} label="Take scan" onPress={()=>go('scanresult')}/>
-   <Hotspot x={0.68} y={0.72} w={0.24} h={0.11} label="Manual measure" onPress={()=>go('scanresult')}/>
+   <Hotspot x={0.04} y={0.10} w={0.92} h={0.58} label="Open live hardware scanner" onPress={openNativeScanner}/>
+   <Hotspot x={0.36} y={0.72} w={0.28} h={0.11} label="Take scan" onPress={openNativeScanner}/>
+   <Hotspot x={0.68} y={0.72} w={0.24} h={0.11} label="Manual measure" onPress={openThreadMeasure}/>
   </>;
-  if(screen==='scanresult')return <Hotspot x={0.08} y={0.80} w={0.84} h={0.07} label="Find replacements" onPress={()=>go('equipment')}/>;
+  if(screen==='scanresult')return <>
+   <Hotspot x={0.08} y={0.80} w={0.84} h={0.07} label="Find replacements" onPress={openReplacementMatch}/>
+   <Hotspot x={0.62} y={0.08} w={0.30} h={0.10} label="LiDAR measure" onPress={openLidarMeasure}/>
+  </>;
+  if(screen==='ar')return <Hotspot x={0.06} y={0.08} w={0.88} h={0.84} label="Open live AR repair assistant" onPress={openNativeAR}/>;
   return null;
  },[screen,selectedSymptom]);
 
@@ -87,7 +96,7 @@ export default function TargetApp(){
   <View style={[s.stage,{width:displayW,height:displayH}]}> 
    <CropLayer screen={screen} width={displayW}/>
    {screenHotspots}
-   {showNav&&NAV.map(([to,x,y,w,h])=><Hotspot key={to} x={x} y={y} w={w} h={h} label={to} onPress={()=>go(to)}/>)}
+   {showNav&&NAV.map(([to,x,y,w,h])=><Hotspot key={to} x={x} y={y} w={w} h={h} label={to} onPress={()=>to==='scanner'?openNativeScanner():to==='ar'?openNativeAR():go(to)}/>)}
    {screen==='login'&&<View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
     <TextInput value={email} onChangeText={setEmail} placeholder="" autoCapitalize="none" keyboardType="email-address" style={[s.invisibleInput,{left:'11%',top:'48.7%',width:'78%',height:'5.5%'}]}/>
     <TextInput value={password} onChangeText={setPassword} placeholder="" secureTextEntry style={[s.invisibleInput,{left:'11%',top:'58.8%',width:'78%',height:'5.5%'}]}/>
