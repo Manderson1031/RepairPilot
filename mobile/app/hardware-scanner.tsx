@@ -1,5 +1,5 @@
 import React,{useCallback,useEffect,useState} from 'react';
-import {ActivityIndicator,Alert,Image,ImageBackground,SafeAreaView,ScrollView,StyleSheet,Text,TouchableOpacity,View} from 'react-native';
+import {ActivityIndicator,Alert,Image,ImageBackground,Platform,SafeAreaView,ScrollView,StyleSheet,Text,TouchableOpacity,View} from 'react-native';
 import {StatusBar} from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
 import * as SecureStore from 'expo-secure-store';
@@ -16,119 +16,38 @@ const PENDING_DEPTH_KEY='repairpilot.hardware.pendingDepth';
 const kinds:HardwareKind[]=['FASTENER','FITTING','BEARING','OTHER'];
 
 export default function HardwareScannerRoute(){
-  const [kind,setKind]=useState<HardwareKind>('FASTENER');
-  const [image,setImage]=useState<any>(null);
-  const [result,setResult]=useState<HardwareScanResult|null>(null);
-  const [busy,setBusy]=useState(false);
-  const [lidarAvailable,setLidarAvailable]=useState(false);
-  const [lidarReason,setLidarReason]=useState('Checking LiDAR support…');
+ const [kind,setKind]=useState<HardwareKind>('FASTENER'),[image,setImage]=useState<any>(null),[result,setResult]=useState<HardwareScanResult|null>(null),[busy,setBusy]=useState(false),[lidarAvailable,setLidarAvailable]=useState(false),[lidarReason,setLidarReason]=useState('Checking LiDAR support…');
+ useEffect(()=>{lidarAvailability().then(a=>{setLidarAvailable(a.available);setLidarReason(a.reason||'ARKit scene-depth measurement is available on this device.')})},[]);
+ useFocusEffect(useCallback(()=>{restoreAndFuseDepth()},[]));
+ const restoreAndFuseDepth=async()=>{try{const [scanRaw,depthRaw,token]=await Promise.all([AsyncStorage.getItem(PENDING_SCAN_KEY),AsyncStorage.getItem(PENDING_DEPTH_KEY),SecureStore.getItemAsync(TOKEN_KEY)]);if(scanRaw){const saved=JSON.parse(scanRaw) as HardwareScanResult;setResult(saved);setKind(saved.kind||'OTHER')}if(!scanRaw||!depthRaw||!token)return;const saved=JSON.parse(scanRaw) as HardwareScanResult;const depth=JSON.parse(depthRaw);setBusy(true);const fused=await fuseHardwareDepth({apiBase:API,token,scan:saved,measurements:depth.measurements||{},confidence:Number(depth.confidence)||0,source:depth.source||'arkit_lidar'});setResult(fused);setKind(fused.kind||saved.kind);await AsyncStorage.setItem(PENDING_SCAN_KEY,JSON.stringify(fused));await AsyncStorage.removeItem(PENDING_DEPTH_KEY)}catch(e:any){Alert.alert('LiDAR Fusion',e?.message||'Could not apply the LiDAR measurement to this scan.')}finally{setBusy(false)}};
+ const analyze=async(asset:any)=>{const token=await SecureStore.getItemAsync(TOKEN_KEY);if(!token)throw new Error('Please sign in to use Hardware Scanner.');setBusy(true);setResult(null);try{const scan=await scanHardwarePhoto({apiBase:API,token,uri:asset.uri,kind,fileName:asset.fileName||'hardware.jpg',mimeType:asset.mimeType||'image/jpeg'});setResult(scan);await AsyncStorage.setItem(PENDING_SCAN_KEY,JSON.stringify(scan));await AsyncStorage.removeItem(PENDING_DEPTH_KEY)}finally{setBusy(false)}};
+ const capture=async()=>{try{const permission=await ImagePicker.requestCameraPermissionsAsync();if(!permission.granted)return Alert.alert('RepairPilot','Camera permission is required for Hardware Scanner.');const picked=await ImagePicker.launchCameraAsync({quality:.9,mediaTypes:['images']});if(picked.canceled)return;const asset=picked.assets[0];setImage(asset);await analyze(asset)}catch(e:any){Alert.alert('RepairPilot',e.message||'Hardware scan failed.')}};
+ const choose=async()=>{try{const picked=await ImagePicker.launchImageLibraryAsync({quality:.9,mediaTypes:['images'],allowsMultipleSelection:false});if(picked.canceled)return;const asset=picked.assets[0];setImage(asset);await analyze(asset)}catch(e:any){Alert.alert('RepairPilot',e.message||'Hardware scan failed.')}};
+ const openLidar=()=>{if(!result)return Alert.alert('Hardware Scanner','Identify the hardware with a photo first.');router.push('/lidar-measure' as any)};
+ const openThread=()=>{if(!result)return Alert.alert('Hardware Scanner','Identify the hardware first.');if(result.kind!=='FASTENER')return Alert.alert('Thread Measurement','Close-up pitch/TPI measurement is currently enabled for fasteners.');router.push('/thread-measure' as any)};
+ const openReplacement=()=>{if(!result)return Alert.alert('Replacement Match','Identify the hardware first.');router.push('/replacement-match' as any)};
+ const startOver=async()=>{setImage(null);setResult(null);await AsyncStorage.multiRemove([PENDING_SCAN_KEY,PENDING_DEPTH_KEY])};
+ const measurement=(label:string,value:number|null|undefined,unit:string)=>value==null?null:<View style={s.measure}><Text style={s.measureLabel}>{label}</Text><Text style={s.measureValue}>{value} {unit}</Text></View>;
 
-  useEffect(()=>{lidarAvailability().then(a=>{setLidarAvailable(a.available);setLidarReason(a.reason||'ARKit scene-depth measurement is available on this device.')})},[]);
-  useFocusEffect(useCallback(()=>{restoreAndFuseDepth()},[]));
-
-  const restoreAndFuseDepth=async()=>{
-    try{
-      const [scanRaw,depthRaw,token]=await Promise.all([
-        AsyncStorage.getItem(PENDING_SCAN_KEY),
-        AsyncStorage.getItem(PENDING_DEPTH_KEY),
-        SecureStore.getItemAsync(TOKEN_KEY)
-      ]);
-      if(scanRaw){
-        const saved=JSON.parse(scanRaw) as HardwareScanResult;
-        setResult(saved);setKind(saved.kind||'OTHER');
-      }
-      if(!scanRaw||!depthRaw||!token)return;
-      const saved=JSON.parse(scanRaw) as HardwareScanResult;
-      const depth=JSON.parse(depthRaw);
-      setBusy(true);
-      const fused=await fuseHardwareDepth({apiBase:API,token,scan:saved,measurements:depth.measurements||{},confidence:Number(depth.confidence)||0,source:depth.source||'arkit_lidar'});
-      setResult(fused);setKind(fused.kind||saved.kind);
-      await AsyncStorage.setItem(PENDING_SCAN_KEY,JSON.stringify(fused));
-      await AsyncStorage.removeItem(PENDING_DEPTH_KEY);
-    }catch(e:any){
-      Alert.alert('LiDAR Fusion',e?.message||'Could not apply the LiDAR measurement to this hardware scan.');
-    }finally{setBusy(false)}
-  };
-
-  const analyze=async(asset:any)=>{
-    const token=await SecureStore.getItemAsync(TOKEN_KEY);
-    if(!token)throw new Error('Please sign in to use Hardware Scanner.');
-    setBusy(true);setResult(null);
-    try{
-      const scan=await scanHardwarePhoto({apiBase:API,token,uri:asset.uri,kind,fileName:asset.fileName||'hardware.jpg',mimeType:asset.mimeType||'image/jpeg'});
-      setResult(scan);
-      await AsyncStorage.setItem(PENDING_SCAN_KEY,JSON.stringify(scan));
-      await AsyncStorage.removeItem(PENDING_DEPTH_KEY);
-    }finally{setBusy(false)}
-  };
-
-  const capture=async()=>{
-    try{
-      const permission=await ImagePicker.requestCameraPermissionsAsync();
-      if(!permission.granted)return Alert.alert('RepairPilot','Camera permission is required for Hardware Scanner.');
-      const picked=await ImagePicker.launchCameraAsync({quality:.9,mediaTypes:['images']});
-      if(picked.canceled)return;
-      const asset=picked.assets[0];setImage(asset);await analyze(asset);
-    }catch(e:any){Alert.alert('RepairPilot',e.message||'Hardware scan failed.')}
-  };
-
-  const choose=async()=>{
-    try{
-      const picked=await ImagePicker.launchImageLibraryAsync({quality:.9,mediaTypes:['images'],allowsMultipleSelection:false});
-      if(picked.canceled)return;
-      const asset=picked.assets[0];setImage(asset);await analyze(asset);
-    }catch(e:any){Alert.alert('RepairPilot',e.message||'Hardware scan failed.')}
-  };
-
-  const openLidar=()=>{
-    if(!result)return Alert.alert('Hardware Scanner','Identify the hardware with a photo first. Then LiDAR measurements can be fused into that scan.');
-    router.push('/lidar-measure' as any);
-  };
-
-  const openThread=()=>{
-    if(!result)return Alert.alert('Hardware Scanner','Identify the hardware first.');
-    if(result.kind!=='FASTENER')return Alert.alert('Thread Measurement','Close-up pitch/TPI measurement is currently enabled for fasteners.');
-    router.push('/thread-measure' as any);
-  };
-
-  const openReplacement=()=>{
-    if(!result)return Alert.alert('Replacement Match','Identify the hardware first.');
-    router.push('/replacement-match' as any);
-  };
-
-  const startOver=async()=>{
-    setImage(null);setResult(null);
-    await AsyncStorage.multiRemove([PENDING_SCAN_KEY,PENDING_DEPTH_KEY]);
-  };
-
-  const measurement=(label:string,value:number|null|undefined,unit:string)=>value==null?null:<View style={s.measure}><Text style={s.measureLabel}>{label}</Text><Text style={s.measureValue}>{value} {unit}</Text></View>;
-
-  return <SafeAreaView style={s.safe}><StatusBar style="light"/><ImageBackground source={require('../assets/industrial-bg-v34.png')} resizeMode="cover" style={s.bg} imageStyle={{opacity:.82}}>
-    <View style={s.top}><TouchableOpacity onPress={()=>router.back()} style={s.iconHit}><MaterialCommunityIcons name="chevron-left" size={30} color="#f4f4f0"/></TouchableOpacity><Text style={s.title}>HARDWARE SCANNER</Text><View style={s.iconHit}/></View>
-    <ScrollView contentContainerStyle={s.wrap}>
-      <View style={s.tabs}>{kinds.map(k=><TouchableOpacity key={k} disabled={busy} onPress={()=>{setKind(k);setResult(null)}} style={[s.tab,kind===k&&s.tabActive]}><Text style={[s.tabText,kind===k&&s.tabTextActive]}>{k}</Text></TouchableOpacity>)}</View>
-      <View style={s.frame}>{image?<Image source={{uri:image.uri}} style={s.photo}/>:<><MaterialCommunityIcons name="line-scan" size={58} color="#ffb000"/><Text style={s.ready}>{result?'SCAN RESTORED':'SCAN READY'}</Text><Text style={s.help}>{result?'Your identification is ready for precision measurement.':'Center one piece of hardware in good light.'}</Text></>}{busy?<View style={s.busy}><ActivityIndicator size="large"/><Text style={s.busyText}>PROCESSING HARDWARE…</Text></View>:null}</View>
-      <View style={s.actions}><TouchableOpacity style={s.action} disabled={busy} onPress={capture}><MaterialCommunityIcons name="camera-outline" size={22} color="#111"/><Text style={s.actionText}>TAKE PHOTO</Text></TouchableOpacity><TouchableOpacity style={s.actionAlt} disabled={busy} onPress={choose}><MaterialCommunityIcons name="image-outline" size={22} color="#ffb000"/><Text style={s.actionAltText}>CHOOSE PHOTO</Text></TouchableOpacity></View>
-      <TouchableOpacity style={[s.lidarButton,(!lidarAvailable||!result)&&s.lidarButtonDisabled]} disabled={busy||!lidarAvailable||!result} onPress={openLidar}><MaterialCommunityIcons name="cube-scan" size={24} color={lidarAvailable&&result?'#111':'#777'}/><View style={{flex:1}}><Text style={[s.lidarTitle,(!lidarAvailable||!result)&&s.lidarTitleDisabled]}>ADD LiDAR DIMENSION</Text><Text style={[s.lidarSub,(!lidarAvailable||!result)&&s.lidarSubDisabled]}>{!result?'Identify the hardware first.':lidarReason}</Text></View><MaterialCommunityIcons name="chevron-right" size={24} color={lidarAvailable&&result?'#111':'#777'}/></TouchableOpacity>
-      <TouchableOpacity style={[s.threadButton,(!result||result.kind!=='FASTENER')&&s.threadButtonDisabled]} disabled={busy||!result||result.kind!=='FASTENER'} onPress={openThread}><MaterialCommunityIcons name="screw-flat-top" size={24} color={result?.kind==='FASTENER'?'#ffb000':'#666'}/><View style={{flex:1}}><Text style={[s.threadTitle,(!result||result.kind!=='FASTENER')&&s.threadTitleDisabled]}>MEASURE THREAD PITCH / TPI</Text><Text style={s.threadSub}>{!result?'Identify a fastener first.':result.kind==='FASTENER'?'Use a calibrated close-up and repeated thread crests.':'Thread measurement is for fasteners.'}</Text></View><MaterialCommunityIcons name="chevron-right" size={24} color={result?.kind==='FASTENER'?'#ffb000':'#666'}/></TouchableOpacity>
-      <View style={s.modeNote}><Text style={s.noteTitle}>FUSED HARDWARE SCAN</Text><Text style={s.noteBody}>Photo vision identifies the part and markings. Trusted LiDAR measurements supply gross dimensions. Calibrated close-up vision measures repeated thread spacing. RepairPilot only resolves an exact size/standard when those measurements agree.</Text></View>
-      {result?<View style={s.result}>
-        <View style={s.resultHead}><View style={{flex:1}}><Text style={s.kicker}>IDENTIFICATION</Text><Text style={s.part}>{result.identified_part||'Not identified with enough confidence'}</Text></View><Text style={s.confidence}>{Math.round((result.confidence||0)*100)}%</Text></View>
-        {result.standard?<Text style={s.standard}>{result.standard}</Text>:null}
-        {result.depth_measurement?.applied?<View style={s.depthApplied}><MaterialCommunityIcons name="check-decagram" size={19} color="#9fe593"/><Text style={s.depthAppliedText}>LiDAR APPLIED • {Math.round((result.depth_measurement.confidence||0)*100)}% DEPTH CONFIDENCE</Text></View>:null}
-        {result.thread_measurement?.applied?<View style={s.threadApplied}><MaterialCommunityIcons name="check-decagram" size={19} color="#9fe593"/><Text style={s.depthAppliedText}>THREAD PITCH APPLIED • {Math.round((result.thread_measurement.confidence||0)*100)}% CONFIDENCE • {result.thread_measurement.interval_count||0} INTERVALS</Text></View>:null}
-        {result.markings?.length?<View style={s.section}><Text style={s.sectionTitle}>VISIBLE MARKINGS</Text><Text style={s.body}>{result.markings.join(' • ')}</Text></View>:null}
-        <View style={s.measureGrid}>{measurement('DIAMETER',result.measurements?.diameter_mm,'mm')}{measurement('LENGTH',result.measurements?.length_mm,'mm')}{measurement('PITCH',result.measurements?.thread_pitch_mm,'mm')}{measurement('THREADS',result.measurements?.threads_per_inch,'TPI')}{measurement('WIDTH',result.measurements?.width_mm,'mm')}{measurement('HEIGHT',result.measurements?.height_mm,'mm')}</View>
-        {result.needs_reference_scale?<View style={s.warning}><MaterialCommunityIcons name="ruler" size={21} color="#ffb000"/><Text style={s.warningText}>Exact dimensions still need a calibrated reference or trusted LiDAR measurement. RepairPilot will not guess them.</Text></View>:null}
-        {result.candidate_matches?.length?<View style={s.section}><Text style={s.sectionTitle}>POSSIBLE MATCHES</Text>{result.candidate_matches.map((c:any,i:number)=><View key={i} style={s.candidate}><Text style={s.candidateName}>{c.name||`Candidate ${i+1}`}</Text>{c.thread_confirmed?<Text style={s.confirmed}>THREAD CONFIRMED</Text>:null}{c.reason?<Text style={s.body}>{c.reason}</Text>:null}</View>)}</View>:null}
-        {result.warnings?.length?<View style={s.section}><Text style={s.sectionTitle}>NOTES</Text>{result.warnings.map((w,i)=><Text key={i} style={s.body}>• {w}</Text>)}</View>:null}
-        <TouchableOpacity style={s.matchButton} disabled={busy} onPress={openReplacement}><MaterialCommunityIcons name="package-variant-closed-check" size={21} color="#111"/><View style={{flex:1}}><Text style={s.matchTitle}>CHECK REPLACEMENT MATCH</Text><Text style={s.matchSub}>See whether the current evidence is strong enough to search for a replacement.</Text></View><MaterialCommunityIcons name="chevron-right" size={23} color="#111"/></TouchableOpacity>
-        <TouchableOpacity style={s.startOver} disabled={busy} onPress={startOver}><Text style={s.startOverText}>START NEW HARDWARE SCAN</Text></TouchableOpacity>
-      </View>:null}
-    </ScrollView>
-  </ImageBackground></SafeAreaView>;
+ return <SafeAreaView style={s.safe}><StatusBar style="light"/><ImageBackground source={require('../assets/industrial-bg-v34.png')} resizeMode="cover" style={s.bg} imageStyle={s.bgImage}><View style={s.shade}/>
+  <View style={s.top}><TouchableOpacity onPress={()=>router.back()} style={s.iconHit}><MaterialCommunityIcons name="chevron-left" size={27} color="#f4f4f0"/></TouchableOpacity><Text style={s.title}>HARDWARE SCANNER</Text><TouchableOpacity style={s.iconHit}><MaterialCommunityIcons name="information-outline" size={20} color="#f4f4f0"/></TouchableOpacity></View>
+  <ScrollView contentContainerStyle={s.wrap}>
+   <View style={s.tabs}>{kinds.map(k=><TouchableOpacity key={k} disabled={busy} onPress={()=>{setKind(k);setResult(null)}} style={[s.tab,kind===k&&s.tabActive]}><Text style={[s.tabText,kind===k&&s.tabTextActive]}>{k}</Text></TouchableOpacity>)}</View>
+   <View style={s.frame}>{image?<Image source={{uri:image.uri}} style={s.photo}/>:<><Text style={s.readyBadge}>SCAN READY</Text><MaterialCommunityIcons name="line-scan" size={50} color="#ffb000"/><Text style={s.help}>Center the hardware in the frame</Text><Text style={s.helpSmall}>Good lighting improves accuracy</Text></>}{busy?<View style={s.busy}><ActivityIndicator size="large"/><Text style={s.busyText}>PROCESSING HARDWARE…</Text></View>:null}<View style={[s.corner,s.c1]}/><View style={[s.corner,s.c2]}/><View style={[s.corner,s.c3]}/><View style={[s.corner,s.c4]}/></View>
+   <View style={s.cameraControls}><TouchableOpacity style={s.sideButton} onPress={()=>{}}><MaterialCommunityIcons name="flashlight" size={20} color="#f0f0eb"/><Text style={s.sideText}>LIGHT</Text></TouchableOpacity><TouchableOpacity style={s.shutter} disabled={busy} onPress={capture}><View style={s.shutterInner}/></TouchableOpacity><TouchableOpacity style={s.sideButton} onPress={choose}><MaterialCommunityIcons name="image-outline" size={20} color="#f0f0eb"/><Text style={s.sideText}>PHOTO</Text></TouchableOpacity></View>
+   <TouchableOpacity style={[s.precisionRow,(!lidarAvailable||!result)&&s.precisionDisabled]} disabled={busy||!lidarAvailable||!result} onPress={openLidar}><MaterialCommunityIcons name="cube-scan" size={21} color={lidarAvailable&&result?'#ffb000':'#666'}/><View style={{flex:1}}><Text style={s.precisionTitle}>ADD LiDAR DIMENSION</Text><Text style={s.precisionSub}>{!result?'Identify the hardware first.':lidarReason}</Text></View><MaterialCommunityIcons name="chevron-right" size={22} color="#8a8f91"/></TouchableOpacity>
+   <TouchableOpacity style={[s.precisionRow,(!result||result.kind!=='FASTENER')&&s.precisionDisabled]} disabled={busy||!result||result.kind!=='FASTENER'} onPress={openThread}><MaterialCommunityIcons name="screw-flat-top" size={21} color={result?.kind==='FASTENER'?'#ffb000':'#666'}/><View style={{flex:1}}><Text style={s.precisionTitle}>MEASURE THREAD PITCH / TPI</Text><Text style={s.precisionSub}>{!result?'Identify a fastener first.':'Use a calibrated close-up and repeated thread crests.'}</Text></View><MaterialCommunityIcons name="chevron-right" size={22} color="#8a8f91"/></TouchableOpacity>
+   {result?<View style={s.result}><View style={s.resultHead}><View style={{flex:1}}><Text style={s.kicker}>SCAN RESULT</Text><Text style={s.part}>{result.identified_part||'Not identified with enough confidence'}</Text></View><View style={s.matchBadge}><Text style={s.matchBadgeText}>{Math.round((result.confidence||0)*100)}% MATCH</Text></View></View>{result.standard?<Text style={s.standard}>{result.standard}</Text>:null}<View style={s.measureGrid}>{measurement('DIAMETER',result.measurements?.diameter_mm,'mm')}{measurement('LENGTH',result.measurements?.length_mm,'mm')}{measurement('PITCH',result.measurements?.thread_pitch_mm,'mm')}{measurement('THREADS',result.measurements?.threads_per_inch,'TPI')}</View><TouchableOpacity style={s.findButton} disabled={busy} onPress={openReplacement}><Text style={s.findButtonText}>FIND REPLACEMENTS</Text><MaterialCommunityIcons name="chevron-right" size={20} color="#111"/></TouchableOpacity><TouchableOpacity style={s.startOver} disabled={busy} onPress={startOver}><Text style={s.startOverText}>START NEW HARDWARE SCAN</Text></TouchableOpacity></View>:null}
+  </ScrollView>
+ </ImageBackground></SafeAreaView>;
 }
 
+const condensed=Platform.select({ios:'AvenirNextCondensed-DemiBold',android:'sans-serif-condensed'});const heavy=Platform.select({ios:'AvenirNextCondensed-Heavy',android:'sans-serif-condensed'});
 const s=StyleSheet.create({
- safe:{flex:1,backgroundColor:'#090b0d'},bg:{flex:1},top:{height:58,flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingHorizontal:10,backgroundColor:'rgba(8,10,11,.9)',borderBottomWidth:1,borderBottomColor:'rgba(255,179,0,.42)'},iconHit:{width:44,height:44,alignItems:'center',justifyContent:'center'},title:{color:'#f4f4f0',fontWeight:'900',fontSize:18,letterSpacing:1},wrap:{padding:16,paddingBottom:60},tabs:{flexDirection:'row',gap:6,marginBottom:12},tab:{flex:1,paddingVertical:10,borderWidth:1,borderColor:'#676b6d',backgroundColor:'rgba(23,25,26,.94)',alignItems:'center'},tabActive:{borderColor:'#ffb000',backgroundColor:'rgba(105,72,5,.86)'},tabText:{color:'#aeb2b4',fontSize:11,fontWeight:'900'},tabTextActive:{color:'#ffd36b'},frame:{height:330,borderWidth:2,borderColor:'#ffb000',backgroundColor:'rgba(5,7,8,.93)',alignItems:'center',justifyContent:'center',overflow:'hidden'},photo:{...StyleSheet.absoluteFill,width:'100%',height:'100%'},ready:{color:'#f4f4f0',fontSize:18,fontWeight:'900',marginTop:8},help:{color:'#aeb2b4',textAlign:'center',marginTop:6,paddingHorizontal:24},busy:{...StyleSheet.absoluteFill,backgroundColor:'rgba(4,6,7,.76)',alignItems:'center',justifyContent:'center'},busyText:{color:'#fff',fontWeight:'900',marginTop:12},actions:{flexDirection:'row',gap:10,marginTop:12},action:{flex:1,backgroundColor:'#ffb000',padding:14,flexDirection:'row',alignItems:'center',justifyContent:'center',gap:7},actionText:{color:'#111',fontWeight:'900'},actionAlt:{flex:1,borderWidth:1,borderColor:'#ffb000',backgroundColor:'rgba(24,25,26,.96)',padding:14,flexDirection:'row',alignItems:'center',justifyContent:'center',gap:7},actionAltText:{color:'#ffd36b',fontWeight:'900'},lidarButton:{marginTop:10,borderWidth:1,borderColor:'#ffd05a',backgroundColor:'#ffb000',padding:12,flexDirection:'row',gap:10,alignItems:'center'},lidarButtonDisabled:{backgroundColor:'rgba(25,27,28,.96)',borderColor:'#4e5355'},lidarTitle:{color:'#111',fontWeight:'900'},lidarTitleDisabled:{color:'#777'},lidarSub:{color:'#43390f',fontSize:10,marginTop:2},lidarSubDisabled:{color:'#8a8f91'},threadButton:{marginTop:8,borderWidth:1,borderColor:'#ffb000',backgroundColor:'rgba(22,24,25,.97)',padding:12,flexDirection:'row',gap:10,alignItems:'center'},threadButtonDisabled:{borderColor:'#4e5355'},threadTitle:{color:'#ffd36b',fontWeight:'900'},threadTitleDisabled:{color:'#777'},threadSub:{color:'#aeb2b4',fontSize:10,marginTop:2},modeNote:{marginTop:10,borderWidth:1,borderColor:'#4d5355',backgroundColor:'rgba(14,17,18,.96)',padding:11},noteTitle:{color:'#ffb000',fontWeight:'900',fontSize:10},noteBody:{color:'#b8bdbe',fontSize:11,lineHeight:17,marginTop:4},result:{marginTop:14,borderWidth:1,borderColor:'rgba(255,179,0,.7)',backgroundColor:'rgba(18,20,21,.96)',padding:14},resultHead:{flexDirection:'row',justifyContent:'space-between',gap:12},kicker:{color:'#ffb000',fontWeight:'900',fontSize:11,letterSpacing:1.3},part:{color:'#fff',fontWeight:'900',fontSize:21,marginTop:4},confidence:{color:'#ffb000',fontWeight:'900',fontSize:20},standard:{color:'#d8dadb',marginTop:7,fontWeight:'700'},depthApplied:{marginTop:10,flexDirection:'row',gap:7,alignItems:'center',borderWidth:1,borderColor:'#41683d',backgroundColor:'rgba(22,48,22,.82)',padding:8},threadApplied:{marginTop:7,flexDirection:'row',gap:7,alignItems:'center',borderWidth:1,borderColor:'#41683d',backgroundColor:'rgba(22,48,22,.82)',padding:8},depthAppliedText:{color:'#bceab5',fontSize:10,fontWeight:'900',flex:1},section:{marginTop:14,paddingTop:12,borderTopWidth:1,borderTopColor:'#444'},sectionTitle:{color:'#ffb000',fontWeight:'900',fontSize:12,marginBottom:6},body:{color:'#c6c9ca',lineHeight:20},measureGrid:{flexDirection:'row',flexWrap:'wrap',gap:8,marginTop:14},measure:{width:'48%',borderWidth:1,borderColor:'#4c5052',backgroundColor:'#111314',padding:10},measureLabel:{color:'#919697',fontSize:10,fontWeight:'900'},measureValue:{color:'#fff',fontWeight:'900',fontSize:17,marginTop:3},warning:{flexDirection:'row',gap:9,marginTop:14,padding:11,borderWidth:1,borderColor:'#8d650d',backgroundColor:'rgba(57,43,14,.86)'},warningText:{color:'#f1dfb2',flex:1,lineHeight:19},candidate:{paddingVertical:8,borderBottomWidth:1,borderBottomColor:'#383b3c'},candidateName:{color:'#fff',fontWeight:'900',marginBottom:3},confirmed:{color:'#9fe593',fontSize:9,fontWeight:'900',marginBottom:3},matchButton:{marginTop:14,backgroundColor:'#ffb000',padding:11,flexDirection:'row',alignItems:'center',gap:8},matchTitle:{color:'#111',fontWeight:'900',fontSize:11},matchSub:{color:'#4a3905',fontSize:9,lineHeight:13,marginTop:2},startOver:{marginTop:8,borderWidth:1,borderColor:'#656b6d',padding:12,alignItems:'center'},startOverText:{color:'#d9dcdd',fontWeight:'900',fontSize:11}
+ safe:{flex:1,backgroundColor:'#060809'},bg:{flex:1},bgImage:{opacity:.62},shade:{...StyleSheet.absoluteFill,backgroundColor:'rgba(0,0,0,.34)'},top:{height:48,flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingHorizontal:8,backgroundColor:'rgba(5,7,8,.88)',borderBottomWidth:1,borderBottomColor:'rgba(255,176,0,.68)'},iconHit:{width:38,height:38,alignItems:'center',justifyContent:'center'},title:{color:'#f4f4f0',fontFamily:heavy,fontWeight:'900',fontSize:17,letterSpacing:.4},wrap:{paddingHorizontal:13,paddingTop:9,paddingBottom:34},
+ tabs:{flexDirection:'row',gap:5,marginBottom:8},tab:{flex:1,paddingVertical:9,borderWidth:1,borderColor:'#616668',backgroundColor:'rgba(18,20,21,.78)',alignItems:'center'},tabActive:{borderColor:'#ffb000',backgroundColor:'rgba(112,75,3,.76)'},tabText:{color:'#aeb2b4',fontFamily:heavy,fontSize:10,fontWeight:'900'},tabTextActive:{color:'#ffd36b'},
+ frame:{height:315,borderWidth:1.5,borderColor:'rgba(255,176,0,.9)',backgroundColor:'rgba(5,7,8,.84)',alignItems:'center',justifyContent:'center',overflow:'hidden'},photo:{...StyleSheet.absoluteFill,width:'100%',height:'100%'},readyBadge:{position:'absolute',top:10,color:'#9fe593',fontFamily:heavy,fontWeight:'900',fontSize:9,borderWidth:1,borderColor:'#41683d',backgroundColor:'rgba(16,38,16,.82)',paddingHorizontal:8,paddingVertical:3},help:{color:'#f0f0ed',fontFamily:condensed,fontSize:12,marginTop:6},helpSmall:{color:'#9fa5a7',fontFamily:condensed,fontSize:10,marginTop:2},busy:{...StyleSheet.absoluteFill,backgroundColor:'rgba(4,6,7,.76)',alignItems:'center',justifyContent:'center'},busyText:{color:'#fff',fontFamily:heavy,fontWeight:'900',fontSize:10,marginTop:8},corner:{position:'absolute',width:28,height:28,borderColor:'#f2f2ee'},c1:{left:17,top:17,borderLeftWidth:2,borderTopWidth:2},c2:{right:17,top:17,borderRightWidth:2,borderTopWidth:2},c3:{left:17,bottom:17,borderLeftWidth:2,borderBottomWidth:2},c4:{right:17,bottom:17,borderRightWidth:2,borderBottomWidth:2},
+ cameraControls:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginTop:8},sideButton:{width:74,height:48,borderWidth:1,borderColor:'#4c5153',backgroundColor:'rgba(14,16,17,.86)',alignItems:'center',justifyContent:'center'},sideText:{color:'#d8dadb',fontFamily:heavy,fontSize:8,fontWeight:'900',marginTop:2},shutter:{width:58,height:58,borderRadius:29,borderWidth:2,borderColor:'#ffb000',alignItems:'center',justifyContent:'center',backgroundColor:'rgba(6,8,9,.88)'},shutterInner:{width:42,height:42,borderRadius:21,backgroundColor:'#ffb000'},
+ precisionRow:{marginTop:8,borderWidth:1,borderColor:'#575c5e',backgroundColor:'rgba(14,16,17,.82)',padding:9,flexDirection:'row',gap:8,alignItems:'center'},precisionDisabled:{opacity:.58},precisionTitle:{color:'#d8dadb',fontFamily:heavy,fontWeight:'900',fontSize:10},precisionSub:{color:'#8f9496',fontFamily:condensed,fontSize:9,marginTop:2},
+ result:{marginTop:10,borderWidth:1,borderColor:'rgba(255,176,0,.68)',backgroundColor:'rgba(10,12,13,.84)',padding:11},resultHead:{flexDirection:'row',justifyContent:'space-between',gap:10},kicker:{color:'#ffb000',fontFamily:heavy,fontWeight:'900',fontSize:9,letterSpacing:1},part:{color:'#fff',fontFamily:heavy,fontWeight:'900',fontSize:18,marginTop:3},matchBadge:{borderWidth:1,borderColor:'#41683d',backgroundColor:'rgba(22,48,22,.82)',paddingHorizontal:7,paddingVertical:4,alignSelf:'flex-start'},matchBadgeText:{color:'#9fe593',fontFamily:heavy,fontSize:8,fontWeight:'900'},standard:{color:'#cfd2d3',fontFamily:condensed,marginTop:5},measureGrid:{flexDirection:'row',flexWrap:'wrap',gap:6,marginTop:9},measure:{width:'48%',borderWidth:1,borderColor:'#3f4446',backgroundColor:'rgba(14,16,17,.9)',padding:8},measureLabel:{color:'#8f9496',fontFamily:heavy,fontSize:8,fontWeight:'900'},measureValue:{color:'#fff',fontFamily:heavy,fontWeight:'900',fontSize:14,marginTop:2},findButton:{marginTop:9,backgroundColor:'#ffb000',padding:11,flexDirection:'row',alignItems:'center',justifyContent:'center',gap:5},findButtonText:{color:'#111',fontFamily:heavy,fontWeight:'900',fontSize:11},startOver:{marginTop:7,borderWidth:1,borderColor:'#5a6062',padding:9,alignItems:'center'},startOverText:{color:'#d9dcdd',fontFamily:heavy,fontWeight:'900',fontSize:9}
 });
