@@ -1,0 +1,30 @@
+name: RepairPilot iPhone Preview Build
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/ios-device-preview.yml'
+
+jobs:
+  eas-ios-preview:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Install project dependencies
+        run: npm ci
+      - name: Set up Expo and EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      - name: Build installable iPhone preview
+        run: eas build --platform ios --profile preview --non-interactive
