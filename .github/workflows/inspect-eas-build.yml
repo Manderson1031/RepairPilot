@@ -9,17 +9,26 @@ on:
 jobs:
   inspect:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Install project dependencies
+        run: npm ci
+      - name: Reproduce iOS JavaScript bundle
+        run: npx expo export --platform ios --output-dir /tmp/repairpilot-ios-export
       - name: Set up Expo and EAS
+        if: always()
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
       - name: Inspect failed EAS build
-        working-directory: mobile
-        run: |
-          eas build:view 31505fad-a8d7-4cfc-810c-d53bf8ecb30e --json || true
+        if: always()
+        run: eas build:view 31505fad-a8d7-4cfc-810c-d53bf8ecb30e --json || true
