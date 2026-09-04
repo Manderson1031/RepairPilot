@@ -8,6 +8,7 @@ on:
       - 'mobile/assets/**'
       - '.github/workflows/ios-device-preview.yml'
 
+# Triggered after approved home-screen visual sync.
 jobs:
   eas-ios-preview:
     runs-on: ubuntu-latest
