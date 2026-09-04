@@ -2,12 +2,6 @@ name: RepairPilot iPhone Preview Build
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - 'mobile/app/**'
-      - 'mobile/assets/**'
-      - 'mobile/scripts/**'
-      - '.github/workflows/ios-device-preview.yml'
 
 jobs:
   eas-ios-preview:
