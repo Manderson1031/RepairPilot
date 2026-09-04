@@ -11,6 +11,7 @@ on:
 # Triggered after approved home-screen visual sync.
 # Fresh run trigger after Expo plan upgrade.
 # Fresh public-repo run trigger.
+# Additional manual fresh run trigger.
 jobs:
   eas-ios-preview:
     runs-on: ubuntu-latest
