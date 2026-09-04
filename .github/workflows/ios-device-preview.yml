@@ -28,3 +28,5 @@ jobs:
           token: ${{ secrets.EXPO_TOKEN }}
       - name: Build installable iPhone preview
         run: eas build --platform ios --profile preview --non-interactive
+
+# Retriggered after configuring EXPO_TOKEN for device-build authentication.
