@@ -9,6 +9,7 @@ on:
       - '.github/workflows/ios-device-preview.yml'
 
 # Triggered after approved home-screen visual sync.
+# Fresh run trigger after Expo plan upgrade.
 jobs:
   eas-ios-preview:
     runs-on: ubuntu-latest
