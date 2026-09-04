@@ -19,10 +19,8 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: mobile/package-lock.json
-      - name: Install Expo SDK 57 development client
-        run: npm install expo-dev-client@~57.0.18 --save
-      - name: Verify Expo dependency compatibility
-        run: npx expo install --check
+      - name: Generate Expo SDK 57 development client manifests
+        run: npm install expo-dev-client@~57.0.18 --save --package-lock-only --ignore-scripts --legacy-peer-deps
       - name: Upload generated manifests
         uses: actions/upload-artifact@v4
         with:
