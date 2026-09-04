@@ -21,6 +21,8 @@ jobs:
           cache-dependency-path: mobile/package-lock.json
       - name: Install project dependencies
         run: npm ci
+      - name: Preflight iOS JavaScript bundle
+        run: npx expo export --platform ios --output-dir dist-ios
       - name: Set up Expo and EAS
         uses: expo/expo-github-action@v8
         with:
@@ -28,5 +30,3 @@ jobs:
           token: ${{ secrets.EXPO_TOKEN }}
       - name: Build installable iPhone preview
         run: eas build --platform ios --profile preview --non-interactive
-
-# Retriggered after configuring EXPO_TOKEN for device-build authentication.
