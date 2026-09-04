@@ -20,3 +20,4 @@ const s=StyleSheet.create({
   scanlineB:{position:'absolute',left:0,right:0,top:'52%',height:1,backgroundColor:'rgba(255,176,0,.05)'},
   vignette:{...StyleSheet.absoluteFill,borderWidth:7,borderColor:'rgba(0,0,0,.18)'}
 });
+
