@@ -3,15 +3,13 @@ name: RepairPilot iPhone Preview Build
 on:
   workflow_dispatch:
   push:
+    branches:
+      - best-2026-09-04-1518
     paths:
       - 'mobile/app/**'
       - 'mobile/assets/**'
       - '.github/workflows/ios-device-preview.yml'
 
-# Triggered after approved home-screen visual sync.
-# Fresh run trigger after Expo plan upgrade.
-# Fresh public-repo run trigger.
-# Additional manual fresh run trigger.
 jobs:
   eas-ios-preview:
     runs-on: ubuntu-latest
@@ -27,6 +25,16 @@ jobs:
           cache-dependency-path: mobile/package-lock.json
       - name: Install project dependencies
         run: npm ci
+      - name: Apply 3:18 PM home layout refinements
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('app/index.tsx')
+          s = p.read_text()
+          s = s.replace("brandTitle:{fontSize:27,letterSpacing:-.8}", "brandTitle:{fontSize:30,letterSpacing:-.8}")
+          s = s.replace("welcome:{height:145,paddingTop:20,paddingHorizontal:7,justifyContent:'flex-start'}", "welcome:{height:145,paddingTop:30,paddingHorizontal:7,justifyContent:'flex-start'}")
+          p.write_text(s)
+          PY
       - name: Preflight iOS JavaScript bundle
         run: npx expo export --platform ios --output-dir dist-ios
       - name: Set up Expo and EAS
