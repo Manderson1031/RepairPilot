@@ -32,6 +32,9 @@ export type AutoHardwareCapture={
   width:number;
   height:number;
   confidence:number;
+  longAxisMm:number|null;
+  shortAxisMm:number|null;
+  depthMm:number|null;
   measurements:LidarMeasurement;
 };
 
@@ -68,23 +71,57 @@ export async function autoCaptureHardwareWithLidar():Promise<AutoHardwareCapture
   if(!nativeModule)throw new Error('LiDAR native module is unavailable in this build.');
   await nativeModule.startSession();
   try{
-    // Give ARKit a brief moment to stabilize tracking/depth before the automatic capture.
-    await new Promise(resolve=>setTimeout(resolve,900));
+    // Give ARKit enough time to settle after the live preview releases the camera.
+    await new Promise(resolve=>setTimeout(resolve,1100));
     const capture=await nativeModule.autoCaptureCenteredObject();
+    const longAxis=Number(capture.measurements?.long_axis_mm)||null;
+    const shortAxis=Number(capture.measurements?.short_axis_mm)||null;
+    const depth=Number(capture.measurements?.depth_mm)||null;
     return {
       imageBase64:capture.image_base64,
       mimeType:capture.mime_type||'image/jpeg',
       width:Number(capture.width)||0,
       height:Number(capture.height)||0,
       confidence:Math.max(0,Math.min(1,Number(capture.confidence)||0)),
+      longAxisMm:longAxis,
+      shortAxisMm:shortAxis,
+      depthMm:depth,
       measurements:{
-        width_mm:Number(capture.measurements?.width_mm)||null,
-        height_mm:Number(capture.measurements?.height_mm)||null,
+        width_mm:shortAxis,
+        height_mm:longAxis,
       },
     };
   }finally{
     await nativeModule.stopSession().catch(()=>{});
   }
+}
+
+export function measurementsForIdentifiedPart(
+  capture:AutoHardwareCapture,
+  scan:{kind?:string;identified_part?:string}
+):LidarMeasurement{
+  const longAxis=capture.longAxisMm;
+  const shortAxis=capture.shortAxisMm;
+  const label=(scan.identified_part||'').toLowerCase();
+  const kind=(scan.kind||'OTHER').toUpperCase();
+
+  if(!longAxis||!shortAxis)return capture.measurements;
+
+  // Once vision has identified the object, convert the two robust principal-axis
+  // extents into the dimensional names that make sense for that part family.
+  if(label.includes('spring')){
+    return {length_mm:longAxis,diameter_mm:shortAxis,width_mm:shortAxis,height_mm:longAxis};
+  }
+  if(kind==='FASTENER' || /bolt|screw|stud|pin|rivet/.test(label)){
+    return {length_mm:longAxis,diameter_mm:shortAxis,width_mm:shortAxis,height_mm:longAxis};
+  }
+  if(kind==='BEARING' || /bearing|bushing|spacer|washer/.test(label)){
+    return {diameter_mm:longAxis,width_mm:shortAxis,height_mm:shortAxis};
+  }
+  if(kind==='FITTING' || /fitting|adapter|coupling|elbow|tee|connector/.test(label)){
+    return {length_mm:longAxis,width_mm:shortAxis,height_mm:capture.depthMm||shortAxis};
+  }
+  return {length_mm:longAxis,width_mm:shortAxis,height_mm:capture.depthMm||shortAxis};
 }
 
 export async function measureLidarPoints(start:LidarPoint,end:LidarPoint):Promise<LidarPointMeasurement>{
