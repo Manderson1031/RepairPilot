@@ -1,4 +1,6 @@
-import {requireOptionalNativeModule} from 'expo-modules-core';
+import React from 'react';
+import {ViewProps} from 'react-native';
+import {requireNativeViewManager,requireOptionalNativeModule} from 'expo-modules-core';
 
 export type RepairPilotARSnapshot={
   image_base64:string;
@@ -24,4 +26,13 @@ export type RepairPilotARNativeModule={
   clearAnchors:()=>Promise<void>;
 };
 
-export default requireOptionalNativeModule<RepairPilotARNativeModule>('RepairPilotAR');
+const nativeModule=requireOptionalNativeModule<RepairPilotARNativeModule>('RepairPilotAR');
+let NativePreview:any=null;
+try{NativePreview=requireNativeViewManager('RepairPilotAR')}catch{}
+
+export function RepairPilotARPreview(props:ViewProps){
+  if(!NativePreview)return null;
+  return React.createElement(NativePreview,props);
+}
+
+export default nativeModule;
