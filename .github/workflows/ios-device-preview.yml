@@ -2,6 +2,11 @@ name: RepairPilot iPhone Preview Build
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - target-dashboard-proof
+    paths:
+      - 'mobile/final-build-trigger.txt'
 
 jobs:
   eas-ios-preview:
@@ -18,8 +23,6 @@ jobs:
           cache-dependency-path: mobile/package-lock.json
       - name: Install project dependencies
         run: npm ci
-      - name: Apply approved target dashboard geometry
-        run: node scripts/apply-target-home.js
       - name: Preflight iOS JavaScript bundle
         run: npx expo export --platform ios --output-dir dist-ios
       - name: Set up Expo and EAS
