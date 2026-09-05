@@ -1,4 +1,7 @@
+import * as FileSystem from 'expo-file-system/legacy';
+
 export type HardwareKind='FASTENER'|'FITTING'|'BEARING'|'OTHER';
+export type HardwareScanMode=HardwareKind|'AUTO';
 
 export type HardwareMeasurements={
   diameter_mm:number|null;
@@ -79,20 +82,28 @@ export async function scanHardwarePhoto(options:{
   apiBase:string;
   token:string;
   uri:string;
-  kind:HardwareKind;
+  kind?:HardwareScanMode;
   fileName?:string;
   mimeType?:string;
   timeoutMs?:number;
 }):Promise<HardwareScanResult>{
-  const {apiBase,token,uri,kind}=options;
-  const form=new FormData();
-  form.append('kind',kind);
-  form.append('file',{
-    uri,
-    name:options.fileName||'repairpilot-hardware.jpg',
-    type:options.mimeType||'image/jpeg'
-  } as any);
-  return jsonRequest<HardwareScanResult>(`${apiBase}/hardware/scan`,token,{method:'POST',body:form},options.timeoutMs??30000);
+  const {apiBase,token,uri}=options;
+  const kind=options.kind||'AUTO';
+  const timeoutMs=options.timeoutMs??45000;
+  const timeout=new Promise<never>((_,reject)=>setTimeout(()=>reject(new Error('RepairPilot timed out. Check your connection and try again.')),timeoutMs));
+  const upload=FileSystem.uploadAsync(`${apiBase}/hardware/scan`,uri,{
+    httpMethod:'POST',
+    uploadType:FileSystem.FileSystemUploadType.MULTIPART,
+    fieldName:'file',
+    mimeType:options.mimeType||'image/jpeg',
+    parameters:{kind},
+    headers:{Authorization:`Bearer ${token}`},
+  });
+  const response=await Promise.race([upload,timeout]);
+  let payload:any={};
+  try{payload=JSON.parse(response.body||'{}')}catch{throw new Error('RepairPilot returned an unreadable hardware-scan response.');}
+  if(response.status<200||response.status>=300)throw new Error(payload?.detail||`Hardware scan failed (${response.status}).`);
+  return payload as HardwareScanResult;
 }
 
 export async function fuseHardwareDepth(options:{
@@ -111,7 +122,7 @@ export async function fuseHardwareDepth(options:{
       scan:options.scan,
       measurements:options.measurements,
       confidence:options.confidence,
-      source:options.source||'arkit_lidar'
+      source:options.source||'arkit_lidar_auto'
     })
   },options.timeoutMs??15000);
 }
