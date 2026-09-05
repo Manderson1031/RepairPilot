@@ -2,6 +2,7 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials
 
 from .authdb import audit
+from .ar_assistant import analyze_ar_component
 from .hardware_depth import fuse_scan_with_depth
 from .hardware_matching import enrich_scan_with_dimensional_candidates
 from .hardware_replacement import replacement_plan
@@ -124,3 +125,46 @@ def hardware_replacement_plan(
         },
     )
     return plan
+
+
+@app.post("/ar/ask")
+@limiter.limit("20/minute")
+def ar_ask(
+    request: Request,
+    payload: dict,
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+):
+    user = user_from_credentials(credentials)
+    image_base64 = str(payload.get("image_base64") or "")
+    if len(image_base64) > 20_000_000:
+        raise HTTPException(413, "AR camera frame is too large.")
+    point = payload.get("point") or {}
+    if not isinstance(point, dict):
+        raise HTTPException(400, "A selected AR point is required.")
+    question = str(payload.get("question") or "").strip()
+    if not question:
+        raise HTTPException(400, "Ask a question about the selected component.")
+    context = payload.get("context") if isinstance(payload.get("context"), dict) else {}
+    try:
+        result = analyze_ar_component(
+            image_base64=image_base64,
+            mime_type=str(payload.get("mime_type") or "image/jpeg"),
+            point=point,
+            question=question[:1200],
+            context=context,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    audit(
+        user["sub"],
+        "ar.component_asked",
+        "equipment",
+        str(context.get("equipment_id") or ""),
+        {
+            "question": question[:180],
+            "identified_part": result.get("identified_part", ""),
+            "confidence": result.get("confidence", 0),
+            "guided_steps": len(result.get("guided_steps") or []),
+        },
+    )
+    return result
