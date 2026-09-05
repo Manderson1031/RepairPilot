@@ -1,6 +1,6 @@
 {
   "platforms": ["apple"],
   "apple": {
-    "modules": ["RepairPilotLidarModule"]
+    "modules": ["RepairPilotLidarModule", "RepairPilotLidarPreviewModule"]
   }
 }
