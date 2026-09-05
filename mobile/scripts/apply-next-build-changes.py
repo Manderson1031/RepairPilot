@@ -25,6 +25,14 @@ old_diag="<View style={s.twoButtons}><TouchableOpacity style={s.outlineHalf} onP
 new_diag="<View style={s.twoButtons}><TouchableOpacity style={s.outlineHalf} onPress={takeDiagnosticPhoto}><MaterialCommunityIcons name=\"camera-outline\" size={19} color={AMBER}/><Text style={s.outlineText}>ADD PHOTO</Text></TouchableOpacity><TouchableOpacity style={s.primaryHalf} onPress={()=>setScreen('complete')}><Text style={s.primaryText}>FINISH REPAIR</Text></TouchableOpacity></View><TouchableOpacity style={s.outlineButton} onPress={()=>Linking.openURL(`repairpilot://ar-assist?mode=guided&equipmentId=${encodeURIComponent(String(selected?.id||''))}&equipmentName=${encodeURIComponent(String(selected?.name||''))}&sessionId=${encodeURIComponent(String(last?.session_id||''))}`)}><MaterialCommunityIcons name=\"cube-scan\" size={19} color={AMBER}/><Text style={s.outlineText}>OPEN GUIDED AR FOR THIS DIAGNOSIS</Text></TouchableOpacity></>}"
 if old_diag not in s: raise SystemExit('Expected diagnosis action block missing')
 s=s.replace(old_diag,new_diag)
-
 p.write_text(s)
-print('Applied RepairPilot app-shell changes: equipment-aware diagnosis, engine icon, guided AR entry, maintenance center routing.')
+
+arp=Path('app/ar-assist.tsx')
+a=arp.read_text()
+old_icon="name={guideStep?'numeric-'+String((guideIndex||0)+1)+'-circle':'target'}"
+new_icon="name={(guideStep?`numeric-${(guideIndex||0)+1}-circle`:'target') as any}"
+if old_icon in a:
+    a=a.replace(old_icon,new_icon)
+arp.write_text(a)
+
+print('Applied RepairPilot app-shell changes: equipment-aware diagnosis, engine icon, guided AR entry, maintenance center routing, AR icon typing.')
