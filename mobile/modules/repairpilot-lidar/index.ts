@@ -1,4 +1,6 @@
-import {requireOptionalNativeModule} from 'expo-modules-core';
+import React from 'react';
+import {ViewProps} from 'react-native';
+import {requireNativeViewManager,requireOptionalNativeModule} from 'expo-modules-core';
 
 export type LidarPoint={x:number;y:number};
 export type LidarPointMeasurement={
@@ -22,7 +24,14 @@ export type LidarAutoScan={
   depth_width:number;
   depth_height:number;
   confidence:number;
-  measurements:{width_mm:number;height_mm:number};
+  point_count?:number;
+  measurements:{
+    long_axis_mm:number;
+    short_axis_mm:number;
+    depth_mm?:number;
+    width_mm:number;
+    height_mm:number;
+  };
 };
 
 export type RepairPilotLidarNative={
@@ -34,4 +43,14 @@ export type RepairPilotLidarNative={
   measureBetweenPoints:(start:LidarPoint,end:LidarPoint)=>Promise<LidarPointMeasurement>;
 };
 
-export default requireOptionalNativeModule<RepairPilotLidarNative>('RepairPilotLidar');
+const nativeModule=requireOptionalNativeModule<RepairPilotLidarNative>('RepairPilotLidar');
+
+let NativePreview:any=null;
+try{NativePreview=requireNativeViewManager('RepairPilotLidar')}catch{}
+
+export function RepairPilotLidarPreview(props:ViewProps){
+  if(!NativePreview)return null;
+  return React.createElement(NativePreview,props);
+}
+
+export default nativeModule;
