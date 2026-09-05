@@ -8,6 +8,11 @@ on:
     paths:
       - 'mobile/app/**'
       - 'mobile/assets/**'
+      - 'mobile/modules/**'
+      - 'mobile/src/**'
+      - 'mobile/scripts/**'
+      - 'mobile/package.json'
+      - 'mobile/app.json'
       - '.github/workflows/ios-device-preview.yml'
 
 jobs:
@@ -24,7 +29,9 @@ jobs:
           cache: npm
           cache-dependency-path: mobile/package-lock.json
       - name: Install project dependencies
-        run: npm ci
+        run: npm install --no-audit --no-fund
+      - name: Apply staged app-shell changes
+        run: python scripts/apply-next-build-changes.py
       - name: Apply 3:18 PM home layout refinements
         run: |
           python - <<'PY'
@@ -35,6 +42,8 @@ jobs:
           s = s.replace("welcome:{height:145,paddingTop:20,paddingHorizontal:7,justifyContent:'flex-start'}", "welcome:{height:145,paddingTop:30,paddingHorizontal:7,justifyContent:'flex-start'}")
           p.write_text(s)
           PY
+      - name: TypeScript check
+        run: npx tsc --noEmit
       - name: Preflight iOS JavaScript bundle
         run: npx expo export --platform ios --output-dir dist-ios
       - name: Set up Expo and EAS
