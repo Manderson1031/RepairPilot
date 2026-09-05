@@ -4,7 +4,7 @@ import RepairPilotAR from '../modules/repairpilot-ar';
 export type ARPoint={x:number;y:number};
 export type ARAnchorPlacement={id:string;confidence?:number;position:{x:number;y:number;z:number}};
 export type ARProjectedAnchor={visible:boolean;x:number;y:number;depth:number};
-export type ARSnapshot={imageUri:string;width:number;height:number;depthAvailable:boolean};
+export type ARSnapshot={imageUri:string;imageBase64:string;mimeType:string;width:number;height:number;depthAvailable:boolean};
 
 export async function arAvailability():Promise<{available:boolean;depthAvailable:boolean;reason?:string}>{
   if(Platform.OS!=='ios')return {available:false,depthAvailable:false,reason:'Native spatial guidance is currently supported on iOS.'};
@@ -29,13 +29,15 @@ export async function startARSession():Promise<{depthAvailable:boolean}>{
   return {depthAvailable:!!result?.depth};
 }
 
-export async function stopARSession():Promise<void>{
-  if(RepairPilotAR)await RepairPilotAR.stopSession();
-}
+export async function stopARSession():Promise<void>{ if(RepairPilotAR)await RepairPilotAR.stopSession(); }
 
 function snapshotResult(snapshot:any):ARSnapshot{
+  const mimeType=snapshot?.mime_type||'image/jpeg';
+  const imageBase64=snapshot?.image_base64||'';
   return {
-    imageUri:`data:${snapshot?.mime_type||'image/jpeg'};base64,${snapshot?.image_base64||''}`,
+    imageUri:`data:${mimeType};base64,${imageBase64}`,
+    imageBase64,
+    mimeType,
     width:Number(snapshot?.width)||0,
     height:Number(snapshot?.height)||0,
     depthAvailable:!!snapshot?.depth_available,
@@ -46,33 +48,22 @@ export async function captureARTargetSnapshot():Promise<ARSnapshot>{
   if(!RepairPilotAR)throw new Error('RepairPilot AR is unavailable in this build.');
   return snapshotResult(await RepairPilotAR.captureTargetSnapshot());
 }
-
 export async function captureARLiveSnapshot():Promise<ARSnapshot>{
   if(!RepairPilotAR)throw new Error('RepairPilot AR is unavailable in this build.');
   return snapshotResult(await RepairPilotAR.captureLiveSnapshot());
 }
-
 export async function placeDepthARAnchor(point:ARPoint):Promise<ARAnchorPlacement>{
   if(!RepairPilotAR)throw new Error('RepairPilot AR is unavailable in this build.');
   return RepairPilotAR.anchorAtFrozenDepthPoint(point);
 }
-
 export async function placeARAnchor(point:ARPoint,depthMeters:number):Promise<ARAnchorPlacement>{
   if(!RepairPilotAR)throw new Error('RepairPilot AR is unavailable in this build.');
   if(!Number.isFinite(depthMeters)||depthMeters<=0)throw new Error('A trusted positive depth is required to anchor guidance to the equipment.');
   return RepairPilotAR.anchorAtImagePoint(point,depthMeters);
 }
-
 export async function projectARAnchor(id:string,width:number,height:number):Promise<ARProjectedAnchor>{
   if(!RepairPilotAR)throw new Error('RepairPilot AR is unavailable in this build.');
   return RepairPilotAR.projectAnchor(id,{width,height});
 }
-
-export async function removeARAnchor(id:string):Promise<void>{
-  if(!RepairPilotAR)throw new Error('RepairPilot AR is unavailable in this build.');
-  await RepairPilotAR.removeAnchor(id);
-}
-
-export async function clearARAnchors():Promise<void>{
-  if(RepairPilotAR)await RepairPilotAR.clearAnchors();
-}
+export async function removeARAnchor(id:string):Promise<void>{ if(RepairPilotAR)await RepairPilotAR.removeAnchor(id); }
+export async function clearARAnchors():Promise<void>{ if(RepairPilotAR)await RepairPilotAR.clearAnchors(); }
