@@ -1,5 +1,6 @@
 import ExpoModulesCore
 import ARKit
+import AVFoundation
 import CoreVideo
 import CoreImage
 import UIKit
@@ -12,6 +13,87 @@ private enum RepairPilotLidarError: Error {
   case invalidPoint
   case invalidDepth
   case imageEncodingFailed
+}
+
+private extension Notification.Name {
+  static let repairPilotPauseCameraPreview = Notification.Name("RepairPilotPauseCameraPreview")
+  static let repairPilotResumeCameraPreview = Notification.Name("RepairPilotResumeCameraPreview")
+}
+
+final class RepairPilotLidarPreviewView: ExpoView {
+  private let captureSession = AVCaptureSession()
+  private let previewLayer: AVCaptureVideoPreviewLayer
+  private let sessionQueue = DispatchQueue(label: "repairpilot.camera.preview")
+  private var configured = false
+
+  required init(appContext: AppContext? = nil) {
+    previewLayer = AVCaptureVideoPreviewLayer(session: captureSession)
+    super.init(appContext: appContext)
+    backgroundColor = .black
+    previewLayer.videoGravity = .resizeAspectFill
+    layer.addSublayer(previewLayer)
+    NotificationCenter.default.addObserver(self, selector: #selector(pausePreview), name: .repairPilotPauseCameraPreview, object: nil)
+    NotificationCenter.default.addObserver(self, selector: #selector(resumePreview), name: .repairPilotResumeCameraPreview, object: nil)
+    configurePreview()
+  }
+
+  deinit {
+    NotificationCenter.default.removeObserver(self)
+    captureSession.stopRunning()
+  }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    previewLayer.frame = bounds
+    if let connection = previewLayer.connection, connection.isVideoRotationAngleSupported(90) {
+      connection.videoRotationAngle = 90
+    }
+  }
+
+  override func didMoveToWindow() {
+    super.didMoveToWindow()
+    if window != nil { startPreview() } else { stopPreview() }
+  }
+
+  private func configurePreview() {
+    sessionQueue.async { [weak self] in
+      guard let self, !self.configured else { return }
+      self.captureSession.beginConfiguration()
+      self.captureSession.sessionPreset = .photo
+      defer { self.captureSession.commitConfiguration() }
+      guard
+        let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+        let input = try? AVCaptureDeviceInput(device: device),
+        self.captureSession.canAddInput(input)
+      else { return }
+      self.captureSession.addInput(input)
+      do {
+        try device.lockForConfiguration()
+        if device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
+        if device.isExposureModeSupported(.continuousAutoExposure) { device.exposureMode = .continuousAutoExposure }
+        device.unlockForConfiguration()
+      } catch {}
+      self.configured = true
+      if self.window != nil && !self.captureSession.isRunning { self.captureSession.startRunning() }
+    }
+  }
+
+  private func startPreview() {
+    sessionQueue.async { [weak self] in
+      guard let self, self.configured, !self.captureSession.isRunning else { return }
+      self.captureSession.startRunning()
+    }
+  }
+
+  private func stopPreview() {
+    sessionQueue.async { [weak self] in
+      guard let self, self.captureSession.isRunning else { return }
+      self.captureSession.stopRunning()
+    }
+  }
+
+  @objc private func pausePreview() { stopPreview() }
+  @objc private func resumePreview() { if window != nil { startPreview() } }
 }
 
 private final class RepairPilotLidarSession {
@@ -27,6 +109,7 @@ private final class RepairPilotLidarSession {
 
   func start() throws {
     guard supported() else { throw RepairPilotLidarError.unsupported }
+    NotificationCenter.default.post(name: .repairPilotPauseCameraPreview, object: nil)
     let configuration = ARWorldTrackingConfiguration()
     configuration.frameSemantics.insert(.sceneDepth)
     if ARWorldTrackingConfiguration.supportsFrameSemantics(.smoothedSceneDepth) {
@@ -44,11 +127,12 @@ private final class RepairPilotLidarSession {
     running = false
     frozenFrame = nil
     frozenDepth = nil
+    NotificationCenter.default.post(name: .repairPilotResumeCameraPreview, object: nil)
   }
 
   func depthFrame() throws -> (ARFrame, ARDepthData) {
     guard running else { throw RepairPilotLidarError.sessionNotRunning }
-    for _ in 0..<40 {
+    for _ in 0..<50 {
       if let frame = session.currentFrame, let depth = frame.smoothedSceneDepth ?? frame.sceneDepth {
         return (frame, depth)
       }
@@ -58,19 +142,23 @@ private final class RepairPilotLidarSession {
   }
 
   private func imagePayload(frame: ARFrame, depth: ARDepthData) throws -> [String: Any] {
-    let image = CIImage(cvPixelBuffer: frame.capturedImage)
-    guard let cgImage = imageContext.createCGImage(image, from: image.extent) else {
+    // ARKit's capturedImage is delivered in the camera sensor's landscape coordinate
+    // space. RepairPilot is portrait-only, so rotate the pixels before encoding.
+    // This keeps the captured scan image aligned with what the user saw in preview.
+    let rawImage = CIImage(cvPixelBuffer: frame.capturedImage)
+    let portraitImage = rawImage.oriented(.right)
+    guard let cgImage = imageContext.createCGImage(portraitImage, from: portraitImage.extent) else {
       throw RepairPilotLidarError.imageEncodingFailed
     }
     let uiImage = UIImage(cgImage: cgImage)
-    guard let jpeg = uiImage.jpegData(compressionQuality: 0.86) else {
+    guard let jpeg = uiImage.jpegData(compressionQuality: 0.9) else {
       throw RepairPilotLidarError.imageEncodingFailed
     }
     return [
       "image_base64": jpeg.base64EncodedString(),
       "mime_type": "image/jpeg",
-      "width": CVPixelBufferGetWidth(frame.capturedImage),
-      "height": CVPixelBufferGetHeight(frame.capturedImage),
+      "width": CVPixelBufferGetHeight(frame.capturedImage),
+      "height": CVPixelBufferGetWidth(frame.capturedImage),
       "depth_width": CVPixelBufferGetWidth(depth.depthMap),
       "depth_height": CVPixelBufferGetHeight(depth.depthMap)
     ]
@@ -90,6 +178,14 @@ private final class RepairPilotLidarSession {
       return (sorted[middle - 1] + sorted[middle]) / 2.0
     }
     return sorted[middle]
+  }
+
+  private func percentile(_ values: [Float], _ fraction: Float) -> Float {
+    let sorted = values.sorted()
+    guard !sorted.isEmpty else { return 0 }
+    let clamped = max(0, min(1, fraction))
+    let index = min(sorted.count - 1, max(0, Int((Float(sorted.count - 1) * clamped).rounded())))
+    return sorted[index]
   }
 
   private func medianDepth(
@@ -142,98 +238,186 @@ private final class RepairPilotLidarSession {
     let deviations = samples.map { abs($0 - depth) }
     let mad = median(deviations)
     let relativeMad = mad / max(depth, 0.001)
-    let consistencyConfidence = max(0.0, min(1.0, 1.0 - (relativeMad / 0.025)))
+    let consistencyConfidence = max(0.0, min(1.0, 1.0 - (relativeMad / 0.03)))
     let coverageConfidence = max(0.0, min(1.0, Float(samples.count) / Float(expectedSamples)))
     let arkitConfidence = confidenceSamples.isEmpty ? 0.5 : confidenceSamples.reduce(0, +) / Float(confidenceSamples.count)
     return (depth, min(arkitConfidence, min(consistencyConfidence, coverageConfidence)))
   }
 
-  func autoCaptureCenteredObject() throws -> [String: Any] {
-    let (frame, depthData) = try depthFrame()
-    frozenFrame = frame
-    frozenDepth = depthData
+  private func centeredObjectPointCloud(frame: ARFrame, depthData: ARDepthData) throws -> ([SIMD3<Float>], Float) {
     let depthMap = depthData.depthMap
     let confidenceMap = depthData.confidenceMap
+    CVPixelBufferLockBaseAddress(depthMap, .readOnly)
+    if let confidenceMap { CVPixelBufferLockBaseAddress(confidenceMap, .readOnly) }
+    defer {
+      CVPixelBufferUnlockBaseAddress(depthMap, .readOnly)
+      if let confidenceMap { CVPixelBufferUnlockBaseAddress(confidenceMap, .readOnly) }
+    }
+
+    guard let base = CVPixelBufferGetBaseAddress(depthMap) else { throw RepairPilotLidarError.invalidDepth }
     let width = CVPixelBufferGetWidth(depthMap)
     let height = CVPixelBufferGetHeight(depthMap)
-    let centerX = width / 2
-    let centerY = height / 2
-    let (centerDepth, centerConfidence) = try medianDepth(buffer: depthMap, confidence: confidenceMap, x: centerX, y: centerY, radius: 4)
-
-    CVPixelBufferLockBaseAddress(depthMap, .readOnly)
-    defer { CVPixelBufferUnlockBaseAddress(depthMap, .readOnly) }
-    guard let base = CVPixelBufferGetBaseAddress(depthMap) else { throw RepairPilotLidarError.invalidDepth }
     let stride = CVPixelBufferGetBytesPerRow(depthMap) / MemoryLayout<Float32>.stride
     let values = base.assumingMemoryBound(to: Float32.self)
-    let tolerance = max(Float(0.012), centerDepth * 0.035)
+    let confidenceBase = confidenceMap.flatMap(CVPixelBufferGetBaseAddress)
+    let confidenceStride = confidenceMap.map { CVPixelBufferGetBytesPerRow($0) / MemoryLayout<UInt8>.stride } ?? 0
 
-    var seedX = centerX
-    var seedY = centerY
-    var seedFound = false
-    for radius in 0...8 where !seedFound {
-      let minX = max(0, centerX - radius), maxX = min(width - 1, centerX + radius)
-      let minY = max(0, centerY - radius), maxY = min(height - 1, centerY + radius)
-      for y in minY...maxY {
-        for x in minX...maxX {
-          let z = values[y * stride + x]
-          if z.isFinite && abs(z - centerDepth) <= tolerance {
-            seedX = x; seedY = y; seedFound = true; break
-          }
-        }
-        if seedFound { break }
+    // Restrict discovery to the central viewfinder so nearby background objects do
+    // not become part of the measured object. We intentionally do NOT require the
+    // object to be a single connected depth blob; springs, clips, washers, and
+    // other open geometry contain holes that expose background between their edges.
+    let roiMinX = Int(Float(width) * 0.12)
+    let roiMaxX = Int(Float(width) * 0.88)
+    let roiMinY = Int(Float(height) * 0.12)
+    let roiMaxY = Int(Float(height) * 0.88)
+    let coreMinX = Int(Float(width) * 0.34)
+    let coreMaxX = Int(Float(width) * 0.66)
+    let coreMinY = Int(Float(height) * 0.34)
+    let coreMaxY = Int(Float(height) * 0.66)
+
+    var coreDepths: [Float] = []
+    for y in coreMinY...coreMaxY {
+      for x in coreMinX...coreMaxX {
+        let z = values[y * stride + x]
+        if z.isFinite && z > 0.05 && z < 3.0 { coreDepths.append(z) }
       }
     }
-    guard seedFound else { throw RepairPilotLidarError.invalidDepth }
+    guard coreDepths.count >= 24 else { throw RepairPilotLidarError.invalidDepth }
 
-    var visited = [Bool](repeating: false, count: width * height)
-    var queueX = [seedX], queueY = [seedY]
-    visited[seedY * width + seedX] = true
-    var cursor = 0
-    var minX = seedX, maxX = seedX, minY = seedY, maxY = seedY
-    var count = 0
-    let directions = [(1,0),(-1,0),(0,1),(0,-1)]
-    while cursor < queueX.count {
-      let x = queueX[cursor], y = queueY[cursor]; cursor += 1
-      let z = values[y * stride + x]
-      guard z.isFinite && z > 0.02 && z < 5.0 && abs(z - centerDepth) <= tolerance else { continue }
-      count += 1
-      minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, y); maxY = max(maxY, y)
-      for (dx,dy) in directions {
-        let nx = x + dx, ny = y + dy
-        if nx < 0 || nx >= width || ny < 0 || ny >= height { continue }
-        let idx = ny * width + nx
-        if !visited[idx] {
-          visited[idx] = true
-          let nz = values[ny * stride + nx]
-          if nz.isFinite && nz > 0.02 && nz < 5.0 && abs(nz - centerDepth) <= tolerance {
-            queueX.append(nx); queueY.append(ny)
-          }
-        }
-      }
-    }
-    guard count >= 30 else { throw RepairPilotLidarError.invalidDepth }
+    // A foreground part typically occupies only a portion of the center window.
+    // Using a low robust percentile finds the part even when the exact center ray
+    // passes through a spring coil gap and lands on the background.
+    let foregroundDepth = percentile(coreDepths, 0.22)
+    let tolerance = max(Float(0.018), foregroundDepth * 0.055)
 
     let cameraWidth = Float(CVPixelBufferGetWidth(frame.capturedImage))
     let cameraHeight = Float(CVPixelBufferGetHeight(frame.capturedImage))
     var intrinsics = frame.camera.intrinsics
     intrinsics.columns.0.x *= Float(width) / cameraWidth
     intrinsics.columns.1.y *= Float(height) / cameraHeight
-    guard intrinsics.columns.0.x > 0, intrinsics.columns.1.y > 0 else { throw RepairPilotLidarError.invalidDepth }
+    intrinsics.columns.2.x *= Float(width) / cameraWidth
+    intrinsics.columns.2.y *= Float(height) / cameraHeight
+    let fx = intrinsics.columns.0.x
+    let fy = intrinsics.columns.1.y
+    let cx = intrinsics.columns.2.x
+    let cy = intrinsics.columns.2.y
+    guard fx > 0, fy > 0 else { throw RepairPilotLidarError.invalidDepth }
 
-    let pixelWidth = Float(maxX - minX + 1)
-    let pixelHeight = Float(maxY - minY + 1)
-    let widthMM = pixelWidth * centerDepth / intrinsics.columns.0.x * 1000.0
-    let heightMM = pixelHeight * centerDepth / intrinsics.columns.1.y * 1000.0
-    guard widthMM.isFinite && heightMM.isFinite && widthMM > 0 && heightMM > 0 else { throw RepairPilotLidarError.invalidDepth }
+    var points: [SIMD3<Float>] = []
+    var selectedDepths: [Float] = []
+    var confidenceSamples: [Float] = []
+    points.reserveCapacity(1500)
 
-    let bboxArea = max(1, (maxX - minX + 1) * (maxY - minY + 1))
-    let fill = min(1.0, Float(count) / Float(bboxArea))
-    let edgePenalty: Float = (minX <= 1 || minY <= 1 || maxX >= width - 2 || maxY >= height - 2) ? 0.45 : 1.0
-    let confidence = max(0.0, min(1.0, centerConfidence * max(0.45, fill) * edgePenalty))
+    // Depth maps are relatively low resolution; every qualifying pixel is useful.
+    // A loose depth band joins separated coils/open geometry while excluding the
+    // background behind them.
+    for y in roiMinY...roiMaxY {
+      for x in roiMinX...roiMaxX {
+        let z = values[y * stride + x]
+        guard z.isFinite && z > 0.05 && z < 3.0 && abs(z - foregroundDepth) <= tolerance else { continue }
+        points.append(SIMD3<Float>(
+          (Float(x) - cx) * z / fx,
+          (Float(y) - cy) * z / fy,
+          z
+        ))
+        selectedDepths.append(z)
+        if let confidenceBase {
+          let confidenceValues = confidenceBase.assumingMemoryBound(to: UInt8.self)
+          let level = confidenceValues[y * confidenceStride + x]
+          confidenceSamples.append(min(1.0, Float(level) / 2.0))
+        }
+      }
+    }
+
+    guard points.count >= 35 else { throw RepairPilotLidarError.invalidDepth }
+
+    let medianSelectedDepth = median(selectedDepths)
+    let depthMad = median(selectedDepths.map { abs($0 - medianSelectedDepth) })
+    let depthConsistency = max(0.0, min(1.0, 1.0 - (depthMad / max(tolerance, 0.001))))
+    let support = max(0.0, min(1.0, Float(points.count) / 180.0))
+    let arkitConfidence = confidenceSamples.isEmpty ? 0.55 : confidenceSamples.reduce(0, +) / Float(confidenceSamples.count)
+    let confidence = max(0.0, min(1.0, arkitConfidence * 0.70 + support * 0.18 + depthConsistency * 0.12))
+    return (points, confidence)
+  }
+
+  private func principalExtentsMM(points: [SIMD3<Float>]) throws -> (long: Float, short: Float, depth: Float) {
+    guard points.count >= 10 else { throw RepairPilotLidarError.invalidDepth }
+
+    let meanX = points.reduce(Float(0)) { $0 + $1.x } / Float(points.count)
+    let meanY = points.reduce(Float(0)) { $0 + $1.y } / Float(points.count)
+    let meanZ = points.reduce(Float(0)) { $0 + $1.z } / Float(points.count)
+
+    var xx: Float = 0
+    var xy: Float = 0
+    var yy: Float = 0
+    for p in points {
+      let dx = p.x - meanX
+      let dy = p.y - meanY
+      xx += dx * dx
+      xy += dx * dy
+      yy += dy * dy
+    }
+    xx /= Float(points.count)
+    xy /= Float(points.count)
+    yy /= Float(points.count)
+
+    let trace = xx + yy
+    let delta = sqrt(max(0, (xx - yy) * (xx - yy) + 4 * xy * xy))
+    let lambda1 = max(0, (trace + delta) / 2)
+
+    var major = SIMD2<Float>(1, 0)
+    if abs(xy) > 0.0000001 {
+      major = simd_normalize(SIMD2<Float>(lambda1 - yy, xy))
+    } else if yy > xx {
+      major = SIMD2<Float>(0, 1)
+    }
+    let minor = SIMD2<Float>(-major.y, major.x)
+
+    var majorValues: [Float] = []
+    var minorValues: [Float] = []
+    var depthValues: [Float] = []
+    majorValues.reserveCapacity(points.count)
+    minorValues.reserveCapacity(points.count)
+    depthValues.reserveCapacity(points.count)
+    for p in points {
+      let d = SIMD2<Float>(p.x - meanX, p.y - meanY)
+      majorValues.append(simd_dot(d, major))
+      minorValues.append(simd_dot(d, minor))
+      depthValues.append(p.z)
+    }
+
+    // Robust 2nd-to-98th percentile extents ignore isolated depth speckles while
+    // still preserving the ends of elongated objects such as compression springs.
+    let longM = percentile(majorValues, 0.98) - percentile(majorValues, 0.02)
+    let shortM = percentile(minorValues, 0.98) - percentile(minorValues, 0.02)
+    let depthM = percentile(depthValues, 0.98) - percentile(depthValues, 0.02)
+    let longMM = longM * 1000
+    let shortMM = shortM * 1000
+    let depthMM = depthM * 1000
+    guard longMM.isFinite, shortMM.isFinite, longMM > 1, shortMM > 1 else { throw RepairPilotLidarError.invalidDepth }
+    return (longMM, shortMM, max(0, depthMM))
+  }
+
+  func autoCaptureCenteredObject() throws -> [String: Any] {
+    let (frame, depthData) = try depthFrame()
+    frozenFrame = frame
+    frozenDepth = depthData
+
+    let (points, confidence) = try centeredObjectPointCloud(frame: frame, depthData: depthData)
+    let extents = try principalExtentsMM(points: points)
 
     var payload = try imagePayload(frame: frame, depth: depthData)
     payload["confidence"] = Double(confidence)
-    payload["measurements"] = ["width_mm": Double(widthMM), "height_mm": Double(heightMM)]
+    payload["measurements"] = [
+      "long_axis_mm": Double(extents.long),
+      "short_axis_mm": Double(extents.short),
+      "depth_mm": Double(extents.depth),
+      // Preserve generic width/height for compatibility. The JS layer maps the
+      // principal axes to semantic fields after AI identifies the part type.
+      "width_mm": Double(extents.short),
+      "height_mm": Double(extents.long)
+    ]
+    payload["point_count"] = points.count
     return payload
   }
 
@@ -265,8 +449,12 @@ private final class RepairPilotLidarSession {
 
 public class RepairPilotLidarModule: Module {
   private let lidar = RepairPilotLidarSession()
+
   public func definition() -> ModuleDefinition {
     Name("RepairPilotLidar")
+
+    View(RepairPilotLidarPreviewView.self) {}
+
     AsyncFunction("isSupported") { () -> Bool in self.lidar.supported() }
     AsyncFunction("startSession") { () -> [String: Bool] in try self.lidar.start(); return ["running": true] }
     AsyncFunction("stopSession") { () -> Void in self.lidar.stop() }
