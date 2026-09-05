@@ -1,4 +1,4 @@
-import base64,json,os
+import json,os
 from openai import OpenAI
 
 
@@ -24,11 +24,13 @@ def analyze_ar_component(image_base64:str,mime_type:str,point:dict,question:str,
         'confidence':{'type':'number','minimum':0,'maximum':1},
         'guided_steps':{'type':'array','items':{
           'type':'object','additionalProperties':False,
-          'required':['instruction','target_label','target_hint'],
+          'required':['instruction','target_label','target_hint','target_x','target_y'],
           'properties':{
             'instruction':{'type':'string'},
             'target_label':{'type':'string'},
-            'target_hint':{'type':'string'}
+            'target_hint':{'type':'string'},
+            'target_x':{'type':'number','minimum':0,'maximum':1},
+            'target_y':{'type':'number','minimum':0,'maximum':1}
           }
         }},
         'safety_notes':{'type':'array','items':{'type':'string'}}
@@ -39,7 +41,7 @@ def analyze_ar_component(image_base64:str,mime_type:str,point:dict,question:str,
     prompt=f'''The user is viewing equipment through RepairPilot AR. The selected component is at normalized portrait-screen coordinate x={x:.3f}, y={y:.3f} (0,0 top-left; 1,1 bottom-right).
 User question: {question}
 Known equipment/session context: {ctx}
-Identify the specific selected component from the full image and answer the question conservatively. Do not invent model-specific procedures, hidden fasteners, torque values, or specifications. If the user asks how to remove, test, replace, install, or repair it, provide a short step-by-step guided procedure ONLY when visually/contextually supportable. Each guided step must name the thing that should be highlighted next (bolt, connector, clamp, part, etc.) and give a visual target hint. Put prerequisites such as disconnecting power, cooling, pressure relief, support, or lockout in safety_notes when relevant. If exact equipment identity is needed for a safe procedure and is not known, say so in answer and keep guided_steps empty.'''
+Identify the specific selected component from the full image and answer the question conservatively. Do not invent model-specific procedures, hidden fasteners, torque values, or specifications. If the user asks how to remove, test, replace, install, or repair it, provide a short step-by-step guided procedure ONLY when visually/contextually supportable. Each guided step must name the thing that should be highlighted next and estimate its normalized portrait-image target_x/target_y coordinate in the SAME supplied frame. Use target_hint to help the user visually confirm the target. Put prerequisites such as disconnecting power, cooling, pressure relief, support, or lockout in safety_notes when relevant. If exact equipment identity is needed for a safe procedure and is not known, say so in answer and keep guided_steps empty.'''
     response=client.responses.create(
       model=os.getenv('REPAIRPILOT_VISION_MODEL','gpt-5.6-terra'),
       instructions='You are RepairPilot AR, a conservative mechanical repair assistant. Ground all visual claims in the supplied image and user-selected point.',
@@ -48,6 +50,6 @@ Identify the specific selected component from the full image and answer the ques
         {'type':'input_image','image_url':f'data:{mime_type or "image/jpeg"};base64,{image_base64}'}
       ]}],
       text={'format':{'type':'json_schema','name':'ar_component_answer','strict':True,'schema':schema}},
-      max_output_tokens=1500,store=False
+      max_output_tokens=1700,store=False
     )
     return json.loads(response.output_text)
