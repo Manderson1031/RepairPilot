@@ -127,12 +127,21 @@ private final class RepairPilotARSession {
     return (depth,confidenceValue)
   }
 
+  private func depthPixelForPortraitPoint(frame: ARFrame, depthWidth: Int, depthHeight: Int, x: Double, y: Double) -> (Int,Int) {
+    let viewPoint=CGPoint(x:max(0,min(1,x)),y:max(0,min(1,y)))
+    let viewport=CGSize(width:CGFloat(depthHeight),height:CGFloat(depthWidth))
+    let displayTransform=frame.displayTransform(for:.portrait,viewportSize:viewport)
+    let imagePoint=viewPoint.applying(displayTransform.inverted())
+    let px=min(depthWidth-1,max(0,Int((imagePoint.x*CGFloat(depthWidth-1)).rounded())))
+    let py=min(depthHeight-1,max(0,Int((imagePoint.y*CGFloat(depthHeight-1)).rounded())))
+    return (px,py)
+  }
+
   private func worldPoint(frame: ARFrame, depthData: ARDepthData, x: Double, y: Double) throws -> (SIMD4<Float>, Float) {
     guard (0...1).contains(x),(0...1).contains(y) else { throw RepairPilotARError.invalidPoint }
     let depthMap=depthData.depthMap, confidenceMap=depthData.confidenceMap
     let depthWidth=CVPixelBufferGetWidth(depthMap), depthHeight=CVPixelBufferGetHeight(depthMap)
-    let px=min(depthWidth-1,max(0,Int((x*Double(depthWidth-1)).rounded())))
-    let py=min(depthHeight-1,max(0,Int((y*Double(depthHeight-1)).rounded())))
+    let (px,py)=depthPixelForPortraitPoint(frame:frame,depthWidth:depthWidth,depthHeight:depthHeight,x:x,y:y)
     let (depth,confidence)=try medianDepth(buffer:depthMap,confidence:confidenceMap,x:px,y:py)
     let cameraWidth=Float(CVPixelBufferGetWidth(frame.capturedImage)), cameraHeight=Float(CVPixelBufferGetHeight(frame.capturedImage))
     var intrinsics=frame.camera.intrinsics
@@ -165,12 +174,13 @@ private final class RepairPilotARSession {
   func anchorAtImagePoint(x: Double, y: Double, depthMeters: Double) throws -> [String: Any] {
     guard (0...1).contains(x),(0...1).contains(y),depthMeters.isFinite,depthMeters>0.02,depthMeters<5.0 else { throw RepairPilotARError.invalidPoint }
     let frame=try currentFrame()
-    let imageWidth=Double(CVPixelBufferGetWidth(frame.capturedImage)), imageHeight=Double(CVPixelBufferGetHeight(frame.capturedImage))
-    let u=Float(x*imageWidth),v=Float(y*imageHeight),intrinsics=frame.camera.intrinsics
+    let imageWidth=CVPixelBufferGetWidth(frame.capturedImage), imageHeight=CVPixelBufferGetHeight(frame.capturedImage)
+    let (px,py)=depthPixelForPortraitPoint(frame:frame,depthWidth:imageWidth,depthHeight:imageHeight,x:x,y:y)
+    let intrinsics=frame.camera.intrinsics
     let fx=intrinsics.columns.0.x,fy=intrinsics.columns.1.y,cx=intrinsics.columns.2.x,cy=intrinsics.columns.2.y
     guard fx>0,fy>0 else { throw RepairPilotARError.frameUnavailable }
     let depth=Float(depthMeters)
-    let cameraPoint=SIMD4<Float>((u-cx)*depth/fx,-(v-cy)*depth/fy,-depth,1)
+    let cameraPoint=SIMD4<Float>((Float(px)-cx)*depth/fx,-(Float(py)-cy)*depth/fy,-depth,1)
     return addAnchor(worldPoint:frame.camera.transform*cameraPoint,confidence:1)
   }
 
