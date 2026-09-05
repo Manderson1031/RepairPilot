@@ -1,5 +1,6 @@
 import ExpoModulesCore
 import ARKit
+import SceneKit
 import CoreVideo
 import CoreImage
 import UIKit
@@ -212,6 +213,7 @@ final class RepairPilotARPreviewView: ExpoView {
   required init(appContext: AppContext? = nil) {
     super.init(appContext:appContext)
     backgroundColor = .black
+    sceneView.scene = SCNScene()
     sceneView.session = sharedAR.session
     sceneView.automaticallyUpdatesLighting = true
     sceneView.contentMode = .scaleAspectFill
